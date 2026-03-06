@@ -12,9 +12,11 @@ export interface EventFormData {
 export async function createEvent(data: EventFormData) {
   const mockUserId = "00000000-0000-0000-0000-000000000000";
 
+  const eventsTable = supabase.from("events") as any;
+  const activityLogsTable = supabase.from("activity_logs") as any;
+
   // Insert the event
-  const { data: event, error } = await supabase
-    .from("events")
+  const { data: event, error } = await eventsTable
     .insert({
       user_id: mockUserId,
       title: data.title,
@@ -23,7 +25,7 @@ export async function createEvent(data: EventFormData) {
       end_time: data.end_time,
       location: data.location,
       notes: data.notes,
-    })
+    } as any)
     .select()
     .single();
 
@@ -32,11 +34,11 @@ export async function createEvent(data: EventFormData) {
   }
 
   // Log the activity
-  await supabase.from("activity_logs").insert({
+  await activityLogsTable.insert({
     user_id: mockUserId,
     action: "CREATE_EVENT",
     description: `YOU HAVE ADDED A NEW EVENT: ${data.title}`,
-  });
+  } as any);
 
   return event;
 }
@@ -60,9 +62,11 @@ export async function getEvents() {
 export async function updateEvent(id: string, updates: Partial<EventFormData>) {
   const mockUserId = "00000000-0000-0000-0000-000000000000";
 
-  const { data, error } = await supabase
-    .from("events")
-    .update(updates)
+  const eventsTable = supabase.from("events") as any;
+  const activityLogsTable = supabase.from("activity_logs") as any;
+
+  const { data, error } = await eventsTable
+    .update(updates as any)
     .eq("id", id)
     .select()
     .single();
@@ -72,11 +76,11 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
   }
 
   // Log the activity
-  await supabase.from("activity_logs").insert({
+  await activityLogsTable.insert({
     user_id: mockUserId,
     action: "UPDATE_EVENT",
     description: `YOU HAVE UPDATED AN EVENT`,
-  });
+  } as any);
 
   return data;
 }
@@ -84,8 +88,10 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
 export async function deleteEvent(id: string) {
   const mockUserId = "00000000-0000-0000-0000-000000000000";
 
-  const { error } = await supabase
-    .from("events")
+  const eventsTable = supabase.from("events") as any;
+  const activityLogsTable = supabase.from("activity_logs") as any;
+
+  const { error } = await eventsTable
     .delete()
     .eq("id", id);
 
@@ -94,11 +100,11 @@ export async function deleteEvent(id: string) {
   }
 
   // Log the activity
-  await supabase.from("activity_logs").insert({
+  await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DELETE_EVENT",
     description: `YOU HAVE DELETED AN EVENT`,
-  });
+  } as any);
 
   return true;
 }
