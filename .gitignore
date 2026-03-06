@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+cura-app/node_modules/
+
+# Next.js
+cura-app/.next/
+cura-app/out/
+cura-app/build/
+cura-app/dist/
+
+# Production
+build/
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+cura-app/.env
+cura-app/.env.local
+cura-app/.env.development.local
+cura-app/.env.test.local
+cura-app/.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+*.pem
+.vercel
+.turbo

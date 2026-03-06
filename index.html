@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CURA - Medical Referral System</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-logo">
+            <img src="https://via.placeholder.com/50x50/1e5a8a/ffffff?text=C" alt="CURA Logo" class="logo">
+        </div>
+        <div class="header-search">
+            <input type="text" placeholder="Search..." class="search-input">
+            <button class="search-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="header-actions">
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14,2 14,8 20,8"></polyline>
+                </svg>
+            </button>
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+            </button>
+            <div class="user-menu-container">
+                <div class="user-avatar-small" onclick="toggleUserMenu()">
+                    <img src="https://via.placeholder.com/40x40/d4a574/ffffff?text=U" alt="User">
+                </div>
+                <div class="user-dropdown" id="userDropdown">
+                    <a href="#" class="user-dropdown-item" onclick="openEditProfileModal()">EDIT MY PROFILE</a>
+                    <a href="activity-logs.html" class="user-dropdown-item">ACTIVITY LOGS</a>
+                    <a href="#" class="user-dropdown-item logout-item">LOGOUT</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Left Sidebar -->
+        <aside class="left-sidebar">
+            <!-- User Profile Card -->
+            <div class="profile-card">
+                <div class="profile-avatar">
+                    <img src="https://via.placeholder.com/100x100/c4956a/ffffff?text=JD" alt="John Doe">
+                </div>
+                <h2 class="profile-name">John Doe</h2>
+                <p class="profile-department">Department | Year Level</p>
+                <div class="profile-icons">
+                    <a href="schedule.html" class="profile-icon-link">
+                        <button class="profile-icon-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" stroke-width="2"></line>
+                                <line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" stroke-width="2"></line>
+                                <line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="2"></line>
+                            </svg>
+                        </button>
+                    </a>
+                    <a href="profiles.html" class="profile-icon-link">
+                        <button class="profile-icon-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                        </button>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Schedule Planner -->
+            <a href="schedule.html" class="schedule-planner-link">
+            <div class="schedule-planner">
+                <h3 class="schedule-title">[USER]'s Schedule Planner</h3>
+                
+                <div class="schedule-day">
+                    <span class="day-badge">MON</span>
+                </div>
+                
+                <div class="schedule-item">
+                    <div class="schedule-time">1:00 - 2:30</div>
+                    <div class="schedule-event">Training for Clinicians</div>
+                    <div class="schedule-location">Seminar Room</div>
+                    <div class="schedule-note">Note: Bring Pen and Patient Records</div>
+                </div>
+                
+                <div class="schedule-item">
+                    <div class="schedule-time">3:30 - 4:00</div>
+                    <div class="schedule-event">Patient Checkup</div>
+                </div>
+                
+                <div class="schedule-day">
+                    <span class="day-badge">TUES</span>
+                </div>
+            </div>
+            </a>
+        </aside>
+
+        <!-- Center Content -->
+        <section class="center-content">
+            <div class="center-header">
+                <button class="new-referral-btn" onclick="openModal()">MAKE NEW REFERRAL</button>
+                <div class="filter-section">
+                    <span>Filter by</span>
+                    <select class="filter-select">
+                        <option>Date</option>
+                        <option>Name</option>
+                        <option>Status</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Referral Cards -->
+            <div class="referral-cards" id="referralCards">
+                <!-- Referral Card 1 -->
+                <div class="referral-card">
+                    <div class="referral-content">
+                        <p><strong>Referring 21 yr. old patient for Oral Diagnosis</strong></p>
+                        <p>Medical Alert: dsada</p>
+                        <p>Clinical Section of Origin: OD</p>
+                        <p>Clinical Section of Destination: OD</p>
+                        <p>Notes and Special Indications: asdsads</p>
+                        <p>Chart Number: 2025-00001</p>
+                        <p>Accepted by: None</p>
+                    </div>
+                    <div class="referral-actions">
+                        <div class="referral-actions-row">
+                            <button class="btn-update">UPDATE</button>
+                            <div class="dots-menu-container">
+                                <button class="btn-dots" onclick="toggleDotsMenu(this)">&#8943;</button>
+                                <div class="dots-dropdown">
+                                    <button class="dropdown-item">See More</button>
+                                    <button class="dropdown-item dropdown-delete">Delete Referral</button>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn-accept">ACCEPT</button>
+                    </div>
+                </div>
+
+                <!-- Referral Card 2 -->
+                <div class="referral-card">
+                    <div class="referral-content">
+                        <p><strong>Referring 21 yr. old patient for Oral Diagnosis</strong></p>
+                        <p>Medical Alert: dsada</p>
+                        <p>Clinical Section of Origin: OD</p>
+                        <p>Clinical Section of Destination: OD</p>
+                        <p>Notes and Special Indications: asdsads</p>
+                        <p>Chart Number: 8173471</p>
+                        <p>Accepted by: John Doe</p>
+                    </div>
+                    <div class="referral-actions">
+                        <div class="referral-actions-row">
+                            <button class="btn-update">UPDATE</button>
+                            <div class="dots-menu-container">
+                                <button class="btn-dots" onclick="toggleDotsMenu(this)">&#8943;</button>
+                                <div class="dots-dropdown">
+                                    <button class="dropdown-item">See More</button>
+                                    <button class="dropdown-item dropdown-delete">Delete Referral</button>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn-accept">ACCEPT</button>
+                    </div>
+                </div>
+
+                <!-- Referral Card 3 -->
+                <div class="referral-card">
+                    <div class="referral-content">
+                        <p><strong>Referring 21 yr. old patient for Oral Diagnosis</strong></p>
+                        <p>Medical Alert: dsada</p>
+                        <p>Clinical Section of Origin: OD</p>
+                        <p>Clinical Section of Destination: OD</p>
+                        <p>Notes and Special Indications: asdsads</p>
+                        <p>Chart Number: 8173471</p>
+                        <p>Accepted by: John Doe</p>
+                    </div>
+                    <div class="referral-actions">
+                        <div class="referral-actions-row">
+                            <button class="btn-update">UPDATE</button>
+                            <div class="dots-menu-container">
+                                <button class="btn-dots" onclick="toggleDotsMenu(this)">&#8943;</button>
+                                <div class="dots-dropdown">
+                                    <button class="dropdown-item">See More</button>
+                                    <button class="dropdown-item dropdown-delete">Delete Referral</button>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn-accept">ACCEPT</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Sidebar -->
+        <aside class="right-sidebar">
+            <!-- Advanced Filter Search -->
+            <div class="advanced-filter">
+                <h3 class="filter-title">ADVANCED FILTER SEARCH</h3>
+                <div class="filter-group">
+                    <select class="filter-dropdown" id="clinicalSection" onchange="updateSectionFilter()">
+                        <option value="">By Clinical Section</option>
+                        <option value="OD">Oral Diagnosis</option>
+                        <option value="DS">Dental Surgery</option>
+                        <option value="OT">Orthodontics</option>
+                    </select>
+                    <select class="filter-dropdown" id="clinicalDiscipline" onchange="updateDisciplineFilter()" disabled>
+                        <option value="">By Clinical Discipline</option>
+                        <option value="general">General</option>
+                        <option value="specialized">Specialized</option>
+                    </select>
+                    <select class="filter-dropdown" id="treatmentService" onchange="updateSearchButton()" disabled>
+                        <option value="">By Treatment Service</option>
+                        <option value="consultation">Consultation</option>
+                        <option value="procedure">Procedure</option>
+                    </select>
+                    <button class="search-filter-btn" id="searchFilterBtn" onclick="performSearch()" disabled>SEARCH</button>
+                </div>
+            </div>
+
+            <!-- Featured Referrals -->
+            <div class="featured-referrals">
+                <h3 class="featured-title">FEATURED REFERRALS</h3>
+                <div class="carousel-container">
+                    <button class="carousel-arrow carousel-left" onclick="prevFeatured()">&#8249;</button>
+                    <div class="carousel-slides" id="featuredSlides">
+                        <div class="featured-card active">
+                            <p><strong>Referring 21 yr. old patient for Oral Diagnosis</strong></p>
+                            <p>Medical Alert: dsada</p>
+                            <p>Clinical Section of Origin: OD</p>
+                            <p>Clinical Section of Destination: OD</p>
+                            <p>Notes and Special Indications: asdsads</p>
+                            <p>Chart Number: 8173471</p>
+                            <p>Initially Referred By: Clinician A</p>
+                            <p>Approved By: Dr. A</p>
+                            <p>Currently Referred By: Clinician B</p>
+                            <p>Approved By: Dr. B</p>
+                            <button class="btn-accept featured-accept">ACCEPT</button>
+                        </div>
+                        <div class="featured-card">
+                            <p><strong>Referring 35 yr. old patient for Dental Surgery</strong></p>
+                            <p>Medical Alert: Diabetic</p>
+                            <p>Clinical Section of Origin: DS</p>
+                            <p>Clinical Section of Destination: DS</p>
+                            <p>Notes and Special Indications: Requires fasting</p>
+                            <p>Chart Number: 8173472</p>
+                            <p>Initially Referred By: Clinician C</p>
+                            <p>Approved By: Dr. C</p>
+                            <p>Currently Referred By: Clinician D</p>
+                            <p>Approved By: Dr. D</p>
+                            <button class="btn-accept featured-accept">ACCEPT</button>
+                        </div>
+                        <div class="featured-card">
+                            <p><strong>Referring 28 yr. old patient for Orthodontics</strong></p>
+                            <p>Medical Alert: None</p>
+                            <p>Clinical Section of Origin: OT</p>
+                            <p>Clinical Section of Destination: OT</p>
+                            <p>Notes and Special Indications: Braces consultation</p>
+                            <p>Chart Number: 8173473</p>
+                            <p>Initially Referred By: Clinician E</p>
+                            <p>Approved By: Dr. E</p>
+                            <p>Currently Referred By: Clinician F</p>
+                            <p>Approved By: Dr. F</p>
+                            <button class="btn-accept featured-accept">ACCEPT</button>
+                        </div>
+                    </div>
+                    <button class="carousel-arrow carousel-right" onclick="nextFeatured()">&#8250;</button>
+                </div>
+                <div class="carousel-dots" id="carouselDots">
+                    <span class="dot active" onclick="goToSlide(0)"></span>
+                    <span class="dot" onclick="goToSlide(1)"></span>
+                    <span class="dot" onclick="goToSlide(2)"></span>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Create Referral Modal -->
+    <div class="modal-overlay" id="createReferralModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">CREATE REFERRAL</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <button class="modal-btn" onclick="openFormModal()">New Patient</button>
+                <button class="modal-btn" onclick="openFormModal()">Existing Patient</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Referral Form Modal -->
+    <div class="modal-overlay" id="referralFormModal">
+        <div class="modal modal-form">
+            <div class="modal-header">
+                <h2 class="modal-title">CREATE REFERRAL</h2>
+                <button class="modal-close" onclick="closeFormModal()">&times;</button>
+            </div>
+            <div class="modal-body form-body">
+                <div class="form-row">
+                    <label class="form-label">Chart Number</label>
+                    <input type="text" class="form-input" id="chartNumber" value="2025-00001">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Treatment</label>
+                    <input type="text" class="form-input" id="treatment">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Age</label>
+                    <input type="number" class="form-input" id="age" min="1" max="99" placeholder="1-99">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Medical Alert</label>
+                    <input type="text" class="form-input" id="medicalAlert">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Clinical Section of Origin</label>
+                    <input type="text" class="form-input" id="sectionOrigin">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Clinical Section of Destination</label>
+                    <input type="text" class="form-input" id="sectionDestination">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Medical History</label>
+                    <textarea class="form-textarea" id="medicalHistory"></textarea>
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Tentative Appointment Schedule</label>
+                    <input type="datetime-local" class="form-input" id="appointmentSchedule">
+                </div>
+                <div class="form-row">
+                    <label class="form-label">Notes and Special Indications</label>
+                    <textarea class="form-textarea form-textarea-lg" id="notes"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-save" onclick="saveReferral()">SAVE</button>
+                    <button class="btn-cancel" onclick="closeFormModal()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Profile Modal -->
+    <div class="modal-overlay" id="editProfileModal">
+        <div class="modal edit-profile-modal">
+            <div class="modal-header">
+                <h2 class="modal-title">EDIT PROFILE</h2>
+                <button class="modal-close-btn" onclick="closeEditProfileModal()">&times;</button>
+            </div>
+            <div class="modal-body edit-profile-body">
+                <div class="profile-avatar-edit">
+                    <div class="avatar-container-large">
+                        <button class="avatar-edit-btn-top">+</button>
+                        <img src="https://via.placeholder.com/120x120/d4a574/ffffff?text=JD" alt="Profile">
+                    </div>
+                </div>
+                <div class="profile-form-grid">
+                    <div class="form-field-readonly">
+                        <label>First Name</label>
+                        <span class="readonly-value">John</span>
+                    </div>
+                    <div class="form-field-readonly">
+                        <label>Last Name</label>
+                        <span class="readonly-value">Doe</span>
+                    </div>
+                    <div class="form-field-editable">
+                        <label>Year Level</label>
+                        <input type="text" value="">
+                    </div>
+                    <div class="form-field-editable">
+                        <label>Clinical Department</label>
+                        <input type="text" value="">
+                    </div>
+                </div>
+                <div class="profile-form-single">
+                    <div class="form-field-row">
+                        <label>Email Address</label>
+                        <input type="email" value="">
+                    </div>
+                    <div class="form-field-row">
+                        <label>Password</label>
+                        <input type="password" value="">
+                    </div>
+                    <div class="form-field-row">
+                        <label>Password Confirmation</label>
+                        <input type="password" value="">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-save">SAVE</button>
+                    <button class="btn-cancel" onclick="closeEditProfileModal()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-icons">
+            <img src="https://via.placeholder.com/40x40/1a5a1a/ffffff?text=1" alt="Seal 1" class="footer-seal">
+            <img src="https://via.placeholder.com/40x40/8b0000/ffffff?text=2" alt="Seal 2" class="footer-seal">
+        </div>
+    </footer>
+
+    <script>
+        // User menu toggle
+        function toggleUserMenu() {
+            document.getElementById('userDropdown').classList.toggle('active');
+        }
+
+        // Close user menu when clicking outside
+        document.addEventListener('click', function(e) {
+            const userMenu = document.getElementById('userDropdown');
+            const userAvatar = document.querySelector('.user-avatar-small');
+            if (userMenu && !userMenu.contains(e.target) && !userAvatar.contains(e.target)) {
+                userMenu.classList.remove('active');
+            }
+        });
+
+        // Edit Profile Modal
+        function openEditProfileModal() {
+            document.getElementById('userDropdown').classList.remove('active');
+            document.getElementById('editProfileModal').classList.add('active');
+        }
+
+        function closeEditProfileModal() {
+            document.getElementById('editProfileModal').classList.remove('active');
+        }
+
+        document.getElementById('editProfileModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeEditProfileModal();
+            }
+        });
+
+        function openModal() {
+            document.getElementById('createReferralModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('createReferralModal').classList.remove('active');
+        }
+
+        function openFormModal() {
+            document.getElementById('createReferralModal').classList.remove('active');
+            document.getElementById('referralFormModal').classList.add('active');
+        }
+
+        function closeFormModal() {
+            document.getElementById('referralFormModal').classList.remove('active');
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('createReferralModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        document.getElementById('referralFormModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeFormModal();
+            }
+        });
+
+        // Filter dependency functionality
+        function updateSectionFilter() {
+            var clinicalSection = document.getElementById('clinicalSection');
+            var clinicalDiscipline = document.getElementById('clinicalDiscipline');
+            var treatmentService = document.getElementById('treatmentService');
+            var searchBtn = document.getElementById('searchFilterBtn');
+            
+            if (clinicalSection.value !== '') {
+                clinicalDiscipline.removeAttribute('disabled');
+            } else {
+                clinicalDiscipline.setAttribute('disabled', 'disabled');
+                clinicalDiscipline.value = '';
+                treatmentService.setAttribute('disabled', 'disabled');
+                treatmentService.value = '';
+                searchBtn.setAttribute('disabled', 'disabled');
+            }
+        }
+
+        function updateDisciplineFilter() {
+            var clinicalDiscipline = document.getElementById('clinicalDiscipline');
+            var treatmentService = document.getElementById('treatmentService');
+            var searchBtn = document.getElementById('searchFilterBtn');
+            
+            if (clinicalDiscipline.value !== '') {
+                treatmentService.removeAttribute('disabled');
+            } else {
+                treatmentService.setAttribute('disabled', 'disabled');
+                treatmentService.value = '';
+                searchBtn.setAttribute('disabled', 'disabled');
+            }
+        }
+
+        function updateSearchButton() {
+            var treatmentService = document.getElementById('treatmentService');
+            var searchBtn = document.getElementById('searchFilterBtn');
+            
+            if (treatmentService.value !== '') {
+                searchBtn.removeAttribute('disabled');
+            } else {
+                searchBtn.setAttribute('disabled', 'disabled');
+            }
+        }
+
+        function performSearch() {
+            const section = document.getElementById('clinicalSection').value;
+            const discipline = document.getElementById('clinicalDiscipline').value;
+            const treatment = document.getElementById('treatmentService').value;
+            
+            alert('Searching with:\nSection: ' + section + '\nDiscipline: ' + discipline + '\nTreatment: ' + treatment);
+        }
+
+        // Carousel functionality
+        let currentSlide = 0;
+        const totalSlides = 3;
+
+        function updateCarousel() {
+            const slides = document.querySelectorAll('.featured-card');
+            const dots = document.querySelectorAll('.dot');
+            
+            slides.forEach((slide, index) => {
+                slide.classList.remove('active');
+                if (index === currentSlide) {
+                    slide.classList.add('active');
+                }
+            });
+            
+            dots.forEach((dot, index) => {
+                dot.classList.remove('active');
+                if (index === currentSlide) {
+                    dot.classList.add('active');
+                }
+            });
+        }
+
+        function nextFeatured() {
+            currentSlide = (currentSlide + 1) % totalSlides;
+            updateCarousel();
+        }
+
+        function prevFeatured() {
+            currentSlide = (currentSlide - 1 + totalSlides) % totalSlides;
+            updateCarousel();
+        }
+
+        function goToSlide(index) {
+            currentSlide = index;
+            updateCarousel();
+        }
+
+        function toggleDotsMenu(button) {
+            const dropdown = button.nextElementSibling;
+            // Close all other dropdowns first
+            document.querySelectorAll('.dots-dropdown.active').forEach(d => {
+                if (d !== dropdown) d.classList.remove('active');
+            });
+            dropdown.classList.toggle('active');
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.dots-menu-container')) {
+                document.querySelectorAll('.dots-dropdown.active').forEach(d => {
+                    d.classList.remove('active');
+                });
+            }
+        });
+
+        function saveReferral() {
+            // Get form values
+            const chartNumber = document.getElementById('chartNumber').value;
+            const treatment = document.getElementById('treatment').value || 'Oral Diagnosis';
+            const age = document.getElementById('age').value || '21';
+            const medicalAlert = document.getElementById('medicalAlert').value || 'None';
+            const sectionOrigin = document.getElementById('sectionOrigin').value || 'OD';
+            const sectionDestination = document.getElementById('sectionDestination').value || 'OD';
+            const notes = document.getElementById('notes').value || 'None';
+
+            // Create new referral card HTML
+            const newCard = document.createElement('div');
+            newCard.className = 'referral-card';
+            newCard.innerHTML = `
+                <div class="referral-content">
+                    <p><strong>Referring ${age} yr. old patient for ${treatment}</strong></p>
+                    <p>Medical Alert: ${medicalAlert}</p>
+                    <p>Clinical Section of Origin: ${sectionOrigin}</p>
+                    <p>Clinical Section of Destination: ${sectionDestination}</p>
+                    <p>Notes and Special Indications: ${notes}</p>
+                    <p>Chart Number: ${chartNumber}</p>
+                    <p>Accepted by: None</p>
+                </div>
+                <div class="referral-actions">
+                    <div class="referral-actions-row">
+                        <button class="btn-update">UPDATE</button>
+                        <div class="dots-menu-container">
+                            <button class="btn-dots" onclick="toggleDotsMenu(this)">&#8943;</button>
+                            <div class="dots-dropdown">
+                                <button class="dropdown-item">See More</button>
+                                <button class="dropdown-item dropdown-delete">Delete Referral</button>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn-accept">ACCEPT</button>
+                </div>
+            `;
+
+            // Add to the beginning of the referral cards container
+            const container = document.getElementById('referralCards');
+            container.insertBefore(newCard, container.firstChild);
+
+            // Reset form and close modal
+            document.getElementById('chartNumber').value = '2025-00001';
+            document.getElementById('treatment').value = '';
+            document.getElementById('age').value = '';
+            document.getElementById('medicalAlert').value = '';
+            document.getElementById('sectionOrigin').value = '';
+            document.getElementById('sectionDestination').value = '';
+            document.getElementById('medicalHistory').value = '';
+            document.getElementById('appointmentSchedule').value = '';
+            document.getElementById('notes').value = '';
+
+            closeFormModal();
+        }
+    </script>
+
+</body>
+</html>

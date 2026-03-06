@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CURA - Search Profiles</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Profiles Page Specific Styles */
+        .profiles-page-container {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 15px;
+            color: #1a3a5c;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .search-header {
+            background: #1a3a5c;
+            padding: 15px 25px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .search-label {
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .profile-search-input {
+            width: 300px;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .profile-search-btn {
+            background: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .profile-search-btn svg {
+            color: #1a3a5c;
+        }
+
+        .profiles-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .profile-card-item {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .profile-card-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .profile-avatar-medium {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .profile-avatar-medium img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .profile-info {
+            flex: 1;
+        }
+
+        .profile-info h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a3a5c;
+            margin: 0 0 5px 0;
+        }
+
+        .profile-info p {
+            font-size: 12px;
+            color: #666;
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        .profile-role {
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-logo">
+            <a href="index.html">
+                <img src="https://via.placeholder.com/50x50/1e5a8a/ffffff?text=C" alt="CURA Logo" class="logo">
+            </a>
+        </div>
+        <div class="header-search">
+            <input type="text" placeholder="Search..." class="search-input">
+            <button class="search-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="header-actions">
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14,2 14,8 20,8"></polyline>
+                </svg>
+            </button>
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+            </button>
+            <div class="user-avatar-small">
+                <img src="https://via.placeholder.com/40x40/d4a574/ffffff?text=U" alt="User">
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="profiles-page-container">
+        <a href="index.html" class="back-link">← Back to Home</a>
+
+        <div class="search-header">
+            <span class="search-label">SEARCH</span>
+            <input type="text" class="profile-search-input" id="profileSearchInput" placeholder="Search profiles...">
+            <button class="profile-search-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+            </button>
+        </div>
+
+        <div class="profiles-grid">
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+
+            <div class="profile-card-item">
+                <div class="profile-avatar-medium">
+                    <img src="https://via.placeholder.com/80x80/d4a574/ffffff?text=DJ" alt="Doe, John">
+                </div>
+                <div class="profile-info">
+                    <h3>DOE, JOHN</h3>
+                    <p class="profile-role">ROLE | DEPARTMENT</p>
+                    <p>YEAR LEVEL</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-icons">
+            <img src="https://via.placeholder.com/40x40/1a5a1a/ffffff?text=1" alt="Seal 1" class="footer-seal">
+            <img src="https://via.placeholder.com/40x40/8b0000/ffffff?text=2" alt="Seal 2" class="footer-seal">
+        </div>
+    </footer>
+</body>
+</html>

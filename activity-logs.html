@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CURA - Activity Logs</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .activity-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .activity-main {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        .activity-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .activity-title {
+            background: #1a3a5c;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .activity-search {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .activity-search-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #1a3a5c;
+        }
+
+        .activity-search-input {
+            width: 200px;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+
+        .activity-search-btn {
+            background: white;
+            border: 1px solid #ccc;
+            padding: 8px;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .activity-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0 10px;
+        }
+
+        .activity-table th {
+            background: #98C8FB;
+            color: #1a3a5c;
+            padding: 12px 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .activity-table th:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .activity-table th:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .activity-table td {
+            background: #f8f9fa;
+            padding: 12px 20px;
+            font-size: 13px;
+            color: #333;
+            text-align: center;
+        }
+
+        .activity-table tr td:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .activity-table tr td:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .date-column {
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-logo">
+            <a href="index.html">
+                <img src="https://via.placeholder.com/50x50/1e5a8a/ffffff?text=C" alt="CURA Logo" class="logo">
+            </a>
+        </div>
+        <div class="header-search">
+            <input type="text" placeholder="Search..." class="search-input">
+            <button class="search-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="header-actions">
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14,2 14,8 20,8"></polyline>
+                </svg>
+            </button>
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+            </button>
+            <div class="user-avatar-small">
+                <img src="https://via.placeholder.com/40x40/d4a574/ffffff?text=U" alt="User">
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="activity-layout">
+        <!-- Left Sidebar -->
+        <aside class="left-sidebar">
+            <!-- User Profile Card -->
+            <div class="profile-card">
+                <div class="profile-avatar">
+                    <img src="https://via.placeholder.com/100x100/c4956a/ffffff?text=JD" alt="John Doe">
+                </div>
+                <h2 class="profile-name">John Doe</h2>
+                <p class="profile-department">Department | Year Level</p>
+                <div class="profile-icons">
+                    <a href="schedule.html" class="profile-icon-link">
+                        <button class="profile-icon-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" stroke-width="2"></line>
+                                <line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" stroke-width="2"></line>
+                                <line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="2"></line>
+                            </svg>
+                        </button>
+                    </a>
+                    <a href="profiles.html" class="profile-icon-link">
+                        <button class="profile-icon-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                        </button>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Schedule Planner -->
+            <a href="schedule.html" class="schedule-planner-link">
+            <div class="schedule-planner">
+                <h3 class="schedule-title">[USER]'s Schedule Planner</h3>
+                
+                <div class="schedule-day">
+                    <span class="day-badge">MON</span>
+                </div>
+                
+                <div class="schedule-item">
+                    <div class="schedule-time">1:00 - 2:30</div>
+                    <div class="schedule-event">Training for Clinicians</div>
+                    <div class="schedule-location">Seminar Room</div>
+                    <div class="schedule-note">Note: Bring Pen and Patient Records</div>
+                </div>
+                
+                <div class="schedule-item">
+                    <div class="schedule-time">3:30 - 4:00</div>
+                    <div class="schedule-event">Patient Checkup</div>
+                </div>
+                
+                <div class="schedule-day">
+                    <span class="day-badge">TUES</span>
+                </div>
+            </div>
+            </a>
+        </aside>
+
+        <!-- Activity Logs Main Content -->
+        <div class="activity-main">
+            <div class="activity-header">
+                <div class="activity-title">ACTIVITY LOGS</div>
+                <div class="activity-search">
+                    <span class="activity-search-label">SEARCH</span>
+                    <input type="text" class="activity-search-input" placeholder="">
+                    <button class="activity-search-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <table class="activity-table">
+                <thead>
+                    <tr>
+                        <th class="date-column">DATE PERFORMED</th>
+                        <th>DESCRIPTION</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>01-01-1000</td>
+                        <td>YOU HAVE ADDED A NEW REFERRAL</td>
+                    </tr>
+                    <tr>
+                        <td>01-01-1000</td>
+                        <td>YOU HAVE ADDED A NEW REFERRAL</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-icons">
+            <img src="https://via.placeholder.com/40x40/1a5a1a/ffffff?text=1" alt="Seal 1" class="footer-seal">
+            <img src="https://via.placeholder.com/40x40/8b0000/ffffff?text=2" alt="Seal 2" class="footer-seal">
+        </div>
+    </footer>
+</body>
+</html>

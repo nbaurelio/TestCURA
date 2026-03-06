@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CURA - Schedule Planner</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Schedule Page Specific Styles */
+        .schedule-page-container {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .schedule-header-bar {
+            background: #1a3a5c;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .schedule-header-bar h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .add-schedule-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .schedule-table-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        .days-header {
+            display: grid;
+            grid-template-columns: 80px repeat(7, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .day-label {
+            background: #98C8FB;
+            color: #1a3a5c;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .day-name {
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .day-date {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .calendar-month-header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .month-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a3a5c;
+        }
+
+        .month-nav-btn {
+            background: #98C8FB;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a3a5c;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .month-nav-btn:hover {
+            background: #7ab8f8;
+        }
+
+        .time-column-header {
+            min-width: 80px;
+        }
+
+        .schedule-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .schedule-row {
+            display: grid;
+            grid-template-columns: 80px repeat(7, 1fr);
+            gap: 10px;
+        }
+
+        .time-slot {
+            font-size: 12px;
+            color: #333;
+            padding: 10px 5px;
+            font-weight: 500;
+        }
+
+        .schedule-cell {
+            background: #e8e8e8;
+            border-radius: 5px;
+            min-height: 35px;
+            padding: 8px;
+            font-size: 11px;
+            color: #333;
+        }
+
+        .schedule-cell.has-event {
+            background: #98C8FB;
+            color: #1a3a5c;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 15px;
+            color: #1a3a5c;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .event-modal {
+            background: #FFFBEF;
+            border-radius: 15px;
+            width: 400px;
+            max-width: 90%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            background: #98C8FB;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 15px 15px 0 0;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1a3a5c;
+            margin: 0;
+        }
+
+        .modal-close {
+            background: none;
+            border: 2px solid #1a3a5c;
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            font-size: 22px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1a3a5c;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            background: rgba(26, 58, 92, 0.1);
+        }
+
+        .event-form-body {
+            padding: 20px 25px;
+        }
+
+        .event-form-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+            gap: 15px;
+        }
+
+        .event-form-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #1a3a5c;
+            min-width: 120px;
+        }
+
+        .event-form-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 13px;
+            background: white;
+        }
+
+        .event-form-input:focus {
+            outline: none;
+            border-color: #98C8FB;
+        }
+
+        .event-form-actions {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+        }
+
+        .btn-save {
+            background: #1a3a5c;
+            color: white;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 5px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-save:hover {
+            background: #2a5a8c;
+        }
+
+        .btn-cancel {
+            background: white;
+            color: #1a3a5c;
+            border: 1px solid #ccc;
+            padding: 10px 25px;
+            border-radius: 5px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-cancel:hover {
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-logo">
+            <a href="index.html">
+                <img src="https://via.placeholder.com/50x50/1e5a8a/ffffff?text=C" alt="CURA Logo" class="logo">
+            </a>
+        </div>
+        <div class="header-search">
+            <input type="text" placeholder="Search..." class="search-input">
+            <button class="search-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="header-actions">
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14,2 14,8 20,8"></polyline>
+                </svg>
+            </button>
+            <button class="icon-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+            </button>
+            <div class="user-avatar-small">
+                <img src="https://via.placeholder.com/40x40/d4a574/ffffff?text=U" alt="User">
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="schedule-page-container">
+        <a href="index.html" class="back-link">← Back to Home</a>
+        
+        <div class="schedule-header-bar">
+            <h1>[USER]'s Schedule Planner</h1>
+            <button class="add-schedule-btn" onclick="openEventModal()">+</button>
+        </div>
+
+        <div class="schedule-table-container">
+            <div class="calendar-month-header">
+                <button class="month-nav-btn" onclick="prevWeek()">&lt;</button>
+                <span class="month-title">January 2026</span>
+                <button class="month-nav-btn" onclick="nextWeek()">&gt;</button>
+            </div>
+            <div class="days-header">
+                <div class="time-column-header"></div>
+                <div class="day-label">
+                    <span class="day-name">SUN</span>
+                    <span class="day-date">4</span>
+                </div>
+                <div class="day-label">
+                    <span class="day-name">MON</span>
+                    <span class="day-date">5</span>
+                </div>
+                <div class="day-label">
+                    <span class="day-name">TUES</span>
+                    <span class="day-date">6</span>
+                </div>
+                <div class="day-label">
+                    <span class="day-name">WED</span>
+                    <span class="day-date">7</span>
+                </div>
+                <div class="day-label">
+                    <span class="day-name">THURS</span>
+                    <span class="day-date">8</span>
+                </div>
+                <div class="day-label">
+                    <span class="day-name">FRI</span>
+                    <span class="day-date">9</span>
+                </div>
+                <div class="day-label">
+                    <span class="day-name">SAT</span>
+                    <span class="day-date">10</span>
+                </div>
+            </div>
+
+            <div class="schedule-grid">
+                <div class="schedule-row">
+                    <div class="time-slot">6:00 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">6:30 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">7:00 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">7:30 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">8:00 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">8:30 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">9:00 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">9:30 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">10:00 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">10:30 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">11:00 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">11:30 AM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">12:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">12:30 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">1:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">1:30 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">2:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">2:30 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">3:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">3:30 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">4:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">4:30 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">5:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">5:30 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+                <div class="schedule-row">
+                    <div class="time-slot">6:00 PM</div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                    <div class="schedule-cell"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Create Event Modal -->
+    <div class="modal-overlay" id="createEventModal">
+        <div class="modal event-modal">
+            <div class="modal-header">
+                <h2 class="modal-title">CREATE EVENT</h2>
+                <button class="modal-close" onclick="closeEventModal()">&times;</button>
+            </div>
+            <div class="modal-body event-form-body">
+                <div class="event-form-row">
+                    <label class="event-form-label">EVENT NAME</label>
+                    <input type="text" class="event-form-input" id="eventName">
+                </div>
+                <div class="event-form-row">
+                    <label class="event-form-label">DESCRIPTION</label>
+                    <input type="text" class="event-form-input" id="eventDescription">
+                </div>
+                <div class="event-form-row">
+                    <label class="event-form-label">EVENT START DATE</label>
+                    <input type="datetime-local" class="event-form-input" id="eventStartDate">
+                </div>
+                <div class="event-form-row">
+                    <label class="event-form-label">EVENT END DATE</label>
+                    <input type="datetime-local" class="event-form-input" id="eventEndDate">
+                </div>
+                <div class="event-form-actions">
+                    <button class="btn-save" onclick="saveEvent()">SAVE</button>
+                    <button class="btn-cancel" onclick="closeEventModal()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-icons">
+            <img src="https://via.placeholder.com/40x40/1a5a1a/ffffff?text=1" alt="Seal 1" class="footer-seal">
+            <img src="https://via.placeholder.com/40x40/8b0000/ffffff?text=2" alt="Seal 2" class="footer-seal">
+        </div>
+    </footer>
+
+    <script>
+        function prevWeek() {
+            alert('Navigate to previous week');
+        }
+
+        function nextWeek() {
+            alert('Navigate to next week');
+        }
+
+        function openEventModal() {
+            document.getElementById('createEventModal').classList.add('active');
+        }
+
+        function closeEventModal() {
+            document.getElementById('createEventModal').classList.remove('active');
+        }
+
+        function saveEvent() {
+            const eventName = document.getElementById('eventName').value;
+            if (eventName) {
+                alert('Event "' + eventName + '" created!');
+                closeEventModal();
+                document.getElementById('eventName').value = '';
+                document.getElementById('eventDescription').value = '';
+                document.getElementById('eventStartDate').value = '';
+                document.getElementById('eventEndDate').value = '';
+            } else {
+                alert('Please enter an event name.');
+            }
+        }
+
+        document.getElementById('createEventModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeEventModal();
+            }
+        });
+    </script>
+</body>
+</html>
