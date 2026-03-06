@@ -108,7 +108,27 @@ export async function createReferral(data: ReferralFormData, allowDuplicate = fa
   return referral;
 }
 
-export async function getReferrals() {
+export interface Referral {
+  id: string;
+  chart_number: string;
+  treatment: string | null;
+  age: number | null;
+  medical_alert: string | null;
+  clinical_section_origin: string;
+  clinical_section_destination: string;
+  clinical_discipline_origin?: string | null;
+  clinical_discipline_destination?: string | null;
+  treatment_service_origin?: string | null;
+  treatment_service_destination?: string | null;
+  medical_history: string | null;
+  notes_and_special_indications: string | null;
+  status: string;
+  is_featured: boolean;
+  accepted_by: string;
+  created_at: string;
+}
+
+export async function getReferrals(): Promise<Referral[]> {
   const { data, error } = await supabase
     .from("referrals")
     .select("*")
@@ -118,7 +138,7 @@ export async function getReferrals() {
     throw error;
   }
 
-  return data;
+  return data || [];
 }
 
 export async function updateReferral(id: string, updates: Partial<ReferralFormData>) {

@@ -12,28 +12,8 @@ import { NewPatientReferralModal } from "@/components/modals/NewPatientReferralM
 import { ExistingPatientReferralModal } from "@/components/modals/ExistingPatientReferralModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { getReferrals, deleteReferral, acceptReferral } from "@/lib/api/referrals";
+import { getReferrals, deleteReferral, acceptReferral, Referral } from "@/lib/api/referrals";
 import { filterTaxonomy, ClinicalSection, ClinicalDiscipline, TreatmentService } from "@/lib/data/filterTaxonomy";
-
-interface Referral {
-  id: string;
-  chart_number: string;
-  treatment: string | null;
-  age: number | null;
-  medical_alert: string | null;
-  clinical_section_origin: string;
-  clinical_section_destination: string;
-  clinical_discipline_origin?: string | null;
-  clinical_discipline_destination?: string | null;
-  treatment_service_origin?: string | null;
-  treatment_service_destination?: string | null;
-  medical_history: string | null;
-  notes_and_special_indications: string | null;
-  status: string;
-  is_featured: boolean;
-  accepted_by: string;
-  created_at: string;
-}
 
 
 export default function HomePage() {
