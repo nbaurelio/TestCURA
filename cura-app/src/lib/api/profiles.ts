@@ -49,8 +49,9 @@ export async function updateProfile(
   
   console.log("Updating profile with data:", updateData);
   
-  const { data, error } = await supabase
-    .from("profiles")
+  const profilesTable = supabase.from("profiles") as any;
+  
+  const { data, error } = await profilesTable
     .update(updateData as any)
     .eq("id", userId)
     .select()
