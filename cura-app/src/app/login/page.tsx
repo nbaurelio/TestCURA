@@ -27,12 +27,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-gradient-to-br from-blue-100 via-blue-50 to-gray-100">
-      {/* Background pattern overlay */}
-      <div className="absolute inset-0 opacity-10">
-        <div className="absolute inset-0" style={{
-          backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(30, 90, 158, 0.1) 35px, rgba(30, 90, 158, 0.1) 70px)`,
-        }} />
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
+      {/* Background Image */}
+      <div className="absolute inset-0">
+        <Image
+          src="/login-bg.jpg"
+          alt="Login Background"
+          fill
+          className="object-cover"
+          priority
+        />
+        {/* Semi-transparent overlay */}
+        <div className="absolute inset-0 bg-[#98C8FB]/80" />
       </div>
 
       {/* Content */}
@@ -42,16 +48,16 @@ export default function LoginPage() {
           <Image 
             src="/cura-logo.png" 
             alt="CURA Logo" 
-            width={300} 
-            height={100}
-            className="object-contain"
+            width={280} 
+            height={95}
+            className="object-contain drop-shadow-lg"
             priority
           />
         </div>
 
         {/* Login Form Card */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-8">
-          <form onSubmit={handleLogin} className="space-y-6">
+        <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 border border-white/20">
+          <form onSubmit={handleLogin} className="space-y-5">
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">
                 {error}
@@ -68,7 +74,7 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#1e5a9e] focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e5a9e] focus:border-transparent transition-all"
                 placeholder="Enter your email"
               />
             </div>
@@ -83,7 +89,7 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#1e5a9e] focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e5a9e] focus:border-transparent transition-all"
                 placeholder="Enter your password"
               />
             </div>
@@ -91,7 +97,7 @@ export default function LoginPage() {
             {/* Login Button */}
             <Button
               type="submit"
-              className="w-full bg-[#1e5a9e] hover:bg-[#174a82] text-white font-semibold py-2.5 rounded-md transition-colors"
+              className="w-full bg-[#1e5a9e] hover:bg-[#174a82] text-white font-bold py-3 rounded-lg transition-all shadow-md hover:shadow-lg mt-6"
             >
               LOGIN
             </Button>

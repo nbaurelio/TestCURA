@@ -6,6 +6,7 @@ export interface ActivityLog {
   action: string;
   description: string;
   created_at: string;
+  metadata?: string;
 }
 
 export async function getActivityLogs() {

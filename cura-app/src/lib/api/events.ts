@@ -38,6 +38,14 @@ export async function createEvent(data: EventFormData) {
     user_id: mockUserId,
     action: "CREATE_EVENT",
     description: `YOU HAVE ADDED A NEW EVENT: ${data.title}`,
+    metadata: JSON.stringify({
+      event_id: event.id,
+      title: data.title,
+      description: data.description,
+      location: data.location,
+      start_time: data.start_time,
+      end_time: data.end_time
+    })
   } as any);
 
   return event;
@@ -79,7 +87,15 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "UPDATE_EVENT",
-    description: `YOU HAVE UPDATED AN EVENT`,
+    description: `YOU HAVE UPDATED AN EVENT: ${data.title || 'Untitled'}`,
+    metadata: JSON.stringify({
+      event_id: id,
+      title: data.title,
+      description: data.description,
+      location: data.location,
+      start_time: data.start_time,
+      end_time: data.end_time
+    })
   } as any);
 
   return data;
@@ -91,6 +107,17 @@ export async function deleteEvent(id: string) {
   const eventsTable = supabase.from("events") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
 
+  // First, get the event details before deleting
+  const { data: event, error: fetchError } = await eventsTable
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+
+  // Now delete the event
   const { error } = await eventsTable
     .delete()
     .eq("id", id);
@@ -99,11 +126,19 @@ export async function deleteEvent(id: string) {
     throw error;
   }
 
-  // Log the activity
+  // Log the activity with the event details we captured
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DELETE_EVENT",
-    description: `YOU HAVE DELETED AN EVENT`,
+    description: `YOU HAVE DELETED AN EVENT: ${event.title}`,
+    metadata: JSON.stringify({
+      event_id: id,
+      title: event.title,
+      description: event.description,
+      location: event.location,
+      start_time: event.start_time,
+      end_time: event.end_time
+    })
   } as any);
 
   return true;

@@ -102,7 +102,12 @@ export async function createReferral(data: ReferralFormData, allowDuplicate = fa
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "CREATE_REFERRAL",
-    description: `YOU HAVE ADDED A NEW REFERRAL`,
+    description: `YOU HAVE ADDED A NEW REFERRAL - Chart: ${referral.chart_number}, Destination: ${referral.clinical_section_destination}`,
+    metadata: JSON.stringify({
+      referral_id: referral.id,
+      chart_number: referral.chart_number,
+      destination: referral.clinical_section_destination
+    })
   } as any);
 
   return referral;
@@ -161,7 +166,11 @@ export async function updateReferral(id: string, updates: Partial<ReferralFormDa
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "UPDATE_REFERRAL",
-    description: `YOU HAVE UPDATED A REFERRAL`,
+    description: `YOU HAVE UPDATED A REFERRAL - Chart: ${data.chart_number || 'N/A'}`,
+    metadata: JSON.stringify({
+      referral_id: id,
+      chart_number: data.chart_number
+    })
   } as any);
 
   return data;
@@ -191,7 +200,47 @@ export async function acceptReferral(id: string, acceptedBy: string) {
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "ACCEPT_REFERRAL",
-    description: `YOU HAVE ACCEPTED A REFERRAL`,
+    description: `YOU HAVE ACCEPTED A REFERRAL - Chart: ${data.chart_number}, Destination: ${data.clinical_section_destination}`,
+    metadata: JSON.stringify({
+      referral_id: id,
+      chart_number: data.chart_number,
+      destination: data.clinical_section_destination,
+      accepted_by: acceptedBy
+    })
+  } as any);
+
+  return data;
+}
+
+export async function approveReferral(id: string) {
+  const mockUserId = "00000000-0000-0000-0000-000000000000";
+
+  const referralsTable = supabase.from("referrals") as any;
+  const activityLogsTable = supabase.from("activity_logs") as any;
+
+  const { data, error } = await referralsTable
+    .update({
+      status: "approved",
+    } as any)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  // Log the activity
+  await activityLogsTable.insert({
+    user_id: mockUserId,
+    action: "APPROVE_REFERRAL",
+    description: `YOU HAVE APPROVED A REFERRAL - Chart: ${data.chart_number}, Destination: ${data.clinical_section_destination}`,
+    metadata: JSON.stringify({
+      referral_id: id,
+      chart_number: data.chart_number,
+      destination: data.clinical_section_destination,
+      approved_by: "Professor"
+    })
   } as any);
 
   return data;
@@ -201,6 +250,17 @@ export async function deleteReferral(id: string) {
   const referralsTable = supabase.from("referrals") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
 
+  // First, get the referral details before deleting
+  const { data: referral, error: fetchError } = await referralsTable
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+
+  // Now delete the referral
   const { error } = await referralsTable
     .delete()
     .eq("id", id);
@@ -209,12 +269,19 @@ export async function deleteReferral(id: string) {
     throw error;
   }
 
-  // Log the activity
+  // Log the activity with the referral details we captured
   const mockUserId = "00000000-0000-0000-0000-000000000000";
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DELETE_REFERRAL",
-    description: `YOU HAVE DELETED A REFERRAL`,
+    description: `YOU HAVE DELETED A REFERRAL - Chart: ${referral.chart_number}, Destination: ${referral.clinical_section_destination}`,
+    metadata: JSON.stringify({
+      referral_id: id,
+      chart_number: referral.chart_number,
+      destination: referral.clinical_section_destination,
+      age: referral.age,
+      medical_alert: referral.medical_alert
+    })
   } as any);
 
   return true;

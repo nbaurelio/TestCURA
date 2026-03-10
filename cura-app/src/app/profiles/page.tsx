@@ -25,7 +25,7 @@ export default function ProfilesPage() {
 
       <main className="flex-1 p-4 sm:p-6 max-w-[1200px] mx-auto w-full">
         {/* Back to Home Link */}
-        <Link href="/" className="text-secondary text-sm mb-4 inline-block hover:underline">
+        <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline">
           ← Back to Home
         </Link>
 

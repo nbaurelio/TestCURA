@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import Link from "next/link";
 import { createEvent, getEvents, updateEvent, deleteEvent, EventFormData } from "@/lib/api/events";
 import { getProfile } from "@/lib/api/profiles";
 
@@ -48,6 +49,9 @@ export default function SchedulePage() {
   const [isEventDetailsOpen, setIsEventDetailsOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState<Event | null>(null);
+  const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(now.toLocaleDateString('en-US', { month: 'long' }));
   const [currentWeekStart, setCurrentWeekStart] = useState(getStartOfWeek(now));
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -94,12 +98,16 @@ export default function SchedulePage() {
     }
   };
 
-  const handleSaveEvent = async () => {
+  const handleSaveEvent = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!formData.title || !formData.start_time || !formData.end_time) {
       setError("Please fill in all required fields");
       return;
     }
+    setIsSaveConfirmOpen(true);
+  };
 
+  const confirmSaveEvent = async () => {
     try {
       setError(null);
       
@@ -121,6 +129,7 @@ export default function SchedulePage() {
       }
       
       await loadEvents();
+      setIsSaveConfirmOpen(false);
       setIsModalOpen(false);
       setIsEditMode(false);
       setSelectedEvent(null);
@@ -169,19 +178,25 @@ export default function SchedulePage() {
     setIsModalOpen(true);
   };
 
-  const handleDeleteEvent = async () => {
+  const handleDeleteEvent = () => {
     if (!selectedEvent) return;
+    setEventToDelete(selectedEvent);
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const confirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
     
-    if (confirm(`Are you sure you want to delete "${selectedEvent.title}"?`)) {
-      try {
-        await deleteEvent(selectedEvent.id);
-        await loadEvents();
-        setIsEventDetailsOpen(false);
-        setSelectedEvent(null);
-      } catch (err) {
-        console.error("Error deleting event:", err);
-        alert("Failed to delete event");
-      }
+    try {
+      await deleteEvent(eventToDelete.id);
+      await loadEvents();
+      setIsDeleteConfirmOpen(false);
+      setEventToDelete(null);
+      setIsEventDetailsOpen(false);
+      setSelectedEvent(null);
+    } catch (err) {
+      console.error("Error deleting event:", err);
+      alert("Failed to delete event");
     }
   };
 
@@ -303,6 +318,10 @@ export default function SchedulePage() {
       <Header />
 
       <main className="flex-1 p-4 sm:p-6 max-w-[1200px] mx-auto w-full">
+        <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline">
+          ← Back to Home
+        </Link>
+
         {/* Header Bar */}
         <div className="bg-secondary rounded-xl p-3 flex items-center justify-between mb-6">
           <h1 className="text-white font-semibold text-sm sm:text-base">{userFirstName}&apos;s Schedule Planner</h1>
@@ -317,7 +336,7 @@ export default function SchedulePage() {
         {/* Calendar Container */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           {/* Month Navigation */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 py-4 px-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 py-4 px-6 border-b border-gray-200">
             <div className="flex items-center gap-4">
               <button 
                 onClick={() => navigateWeek('prev')}
@@ -357,54 +376,72 @@ export default function SchedulePage() {
           </div>
 
           {/* Days Header */}
-          <div className="grid grid-cols-8 gap-1 px-2">
-            <div className=""></div>
-            {weekDates.map((date, idx) => (
-              <div key={idx} className="text-center">
-                <div className="bg-primary rounded-lg py-1.5 px-1.5">
-                  <div className="text-[10px] font-semibold text-secondary">{days[idx]}</div>
-                  <div className="text-sm font-bold text-secondary">{date.getDate()}</div>
+          <div className="grid grid-cols-8 gap-2 px-4 py-3 bg-gray-50">
+            <div className="w-5 pr-1"></div>
+            {weekDates.map((date, idx) => {
+              const isToday = date.toDateString() === new Date().toDateString();
+              return (
+                <div key={idx} className="text-center">
+                  <div className={`rounded-lg py-2 px-2 ${
+                    isToday 
+                      ? 'bg-secondary border-2 border-secondary shadow-md' 
+                      : 'bg-primary'
+                  }`}>
+                    <div className={`text-[10px] font-semibold ${
+                      isToday ? 'text-white' : 'text-secondary'
+                    }`}>{days[idx]}</div>
+                    <div className={`text-sm font-bold ${
+                      isToday ? 'text-white' : 'text-secondary'
+                    }`}>{date.getDate()}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Schedule Grid */}
-          <div className="max-h-[500px] overflow-y-auto px-2 pb-4">
+          <div className="max-h-[500px] overflow-y-auto px-4 pb-4 pt-2">
             {loading ? (
               <div className="text-center py-8 text-gray-500">Loading events...</div>
             ) : (
               times.map((time, timeIdx) => (
-                <div key={time} className="grid grid-cols-8 gap-1" style={{ marginTop: timeIdx === 0 ? 0 : '0.25rem' }}>
-                  <div className="p-1 text-xs text-gray-500 text-right pr-2 flex items-center justify-end">
+                <div key={time} className="grid grid-cols-8 gap-2" style={{ marginTop: timeIdx === 0 ? 0 : '0.5rem' }}>
+                  <div className="w-16 text-xs text-gray-600 text-right pr-1 flex items-center justify-end font-medium">
                     {time}
                   </div>
                   {weekDates.map((date, idx) => {
                     const slotEvents = getEventsForTimeSlot(date, time);
                     const eventStartingHere = slotEvents.find(e => isEventStart(e, date, time));
+                    const isToday = date.toDateString() === new Date().toDateString();
                     
                     return (
                       <div
                         key={`${time}-${idx}`}
-                        className="relative"
+                        className={`relative ${
+                          isToday ? 'bg-secondary/5 rounded-lg' : ''
+                        }`}
                       >
                         {eventStartingHere ? (
                           <div 
                             onClick={() => handleEventClick(eventStartingHere)}
-                            className="bg-secondary text-white rounded-lg text-[10px] font-semibold overflow-hidden hover:bg-secondary/90 cursor-pointer transition-colors flex items-center justify-center p-1"
+                            className="bg-secondary text-white rounded-lg text-[10px] font-semibold overflow-hidden hover:bg-secondary/90 cursor-pointer transition-colors flex items-center justify-center p-2"
                             style={{
-                              height: `calc(${getEventDurationInSlots(eventStartingHere) * 2}rem + ${(getEventDurationInSlots(eventStartingHere) - 1) * 0.25}rem)`,
+                              height: `calc(${getEventDurationInSlots(eventStartingHere) * 2}rem + ${(getEventDurationInSlots(eventStartingHere) - 1) * 0.5}rem)`,
                               position: 'absolute',
                               width: '100%',
                               zIndex: 10
                             }}
                           >
-                            <span className="text-center">{eventStartingHere.title}</span>
+                            <span className="text-center leading-tight">{eventStartingHere.title}</span>
                           </div>
                         ) : slotEvents.length === 0 ? (
                           <div 
                             onClick={() => handleTimeSlotClick(date, time)}
-                            className="bg-gray-100 rounded-lg h-8 hover:bg-primary/20 cursor-pointer transition-colors" 
+                            className={`rounded-lg h-8 hover:bg-primary/30 cursor-pointer transition-colors ${
+                              isToday 
+                                ? 'bg-secondary/10 border-2 border-secondary/30' 
+                                : 'bg-gray-50 border border-gray-200'
+                            }`}
                           />
                         ) : (
                           <div className="h-8" />
@@ -422,60 +459,99 @@ export default function SchedulePage() {
       <Footer />
 
       {/* Event Details Modal */}
-      <Dialog open={isEventDetailsOpen} onOpenChange={setIsEventDetailsOpen}>
-        <DialogContent className="bg-background max-w-[400px] p-0 gap-0 rounded-lg overflow-hidden">
-          <DialogHeader className="bg-primary p-4">
-            <DialogTitle className="text-secondary font-bold text-base">
-              EVENT DETAILS
+      <Dialog open={isEventDetailsOpen && !isDeleteConfirmOpen} onOpenChange={setIsEventDetailsOpen}>
+        <DialogContent className="bg-white max-w-[380px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10">
+            <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
+              Event Details
             </DialogTitle>
           </DialogHeader>
 
           {selectedEvent && (
-            <div className="p-5 space-y-3">
-              <div>
-                <h3 className="text-sm font-bold text-secondary mb-1">Event Name</h3>
-                <p className="text-sm text-gray-700">{selectedEvent.title}</p>
+            <div className="p-3 sm:p-4 space-y-2.5 sm:space-y-3">
+              {/* Event Name */}
+              <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3">
+                <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5">Event Name</h3>
+                <p className="text-xs text-gray-800 font-medium break-words">{selectedEvent.title}</p>
               </div>
               
+              {/* Description */}
               {selectedEvent.description && (
-                <div>
-                  <h3 className="text-sm font-bold text-secondary mb-1">Description</h3>
-                  <p className="text-sm text-gray-700">{selectedEvent.description}</p>
+                <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 border border-blue-200">
+                  <h3 className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5">Description</h3>
+                  <p className="text-xs text-gray-800 break-words">{selectedEvent.description}</p>
                 </div>
               )}
               
+              {/* Location */}
               {selectedEvent.location && (
-                <div>
-                  <h3 className="text-sm font-bold text-secondary mb-1">Location</h3>
-                  <p className="text-sm text-gray-700">{selectedEvent.location}</p>
+                <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 border border-green-200">
+                  <h3 className="text-[10px] font-bold text-green-700 uppercase tracking-wide mb-1.5">Location</h3>
+                  <p className="text-xs text-gray-800 break-words">{selectedEvent.location}</p>
                 </div>
               )}
               
-              <div>
-                <h3 className="text-sm font-bold text-secondary mb-1">Start Time</h3>
-                <p className="text-sm text-gray-700">
-                  {new Date(selectedEvent.start_time).toLocaleString()}
-                </p>
-              </div>
-              
-              <div>
-                <h3 className="text-sm font-bold text-secondary mb-1">End Time</h3>
-                <p className="text-sm text-gray-700">
-                  {new Date(selectedEvent.end_time).toLocaleString()}
-                </p>
-              </div>
-              
-              {selectedEvent.notes && (
+              {/* Time Information */}
+              <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 space-y-2">
                 <div>
-                  <h3 className="text-sm font-bold text-secondary mb-1">Notes</h3>
-                  <p className="text-sm text-gray-700">{selectedEvent.notes}</p>
+                  <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5">Start Time</h3>
+                  <p className="text-[11px] sm:text-xs text-gray-800 font-medium">
+                    {new Date(selectedEvent.start_time).toLocaleString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true
+                    })}
+                  </p>
+                </div>
+                
+                <div>
+                  <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5">End Time</h3>
+                  <p className="text-[11px] sm:text-xs text-gray-800 font-medium">
+                    {new Date(selectedEvent.end_time).toLocaleString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true
+                    })}
+                  </p>
+                </div>
+              </div>
+              
+              {/* Notes */}
+              {selectedEvent.notes && (
+                <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 border border-yellow-200">
+                  <h3 className="text-[10px] font-bold text-yellow-700 uppercase tracking-wide mb-1.5">Notes</h3>
+                  <p className="text-xs text-gray-800 break-words">{selectedEvent.notes}</p>
                 </div>
               )}
 
-              <div className="flex justify-center gap-4 pt-4 border-t border-gray-200 mt-4">
-                <Button className="px-8" onClick={handleEditEvent}>EDIT</Button>
-                <Button variant="destructive" onClick={handleDeleteEvent}>DELETE</Button>
-                <Button variant="outline" onClick={() => setIsEventDetailsOpen(false)}>
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2 pt-1.5">
+                <Button 
+                  className="w-full sm:flex-1 bg-secondary text-white text-[10px] font-bold hover:bg-secondary/90 h-8" 
+                  onClick={handleEditEvent}
+                >
+                  EDIT
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full sm:flex-1 border-2 border-red-500 text-red-600 text-[10px] font-bold hover:bg-red-50 h-8"
+                  onClick={handleDeleteEvent}
+                >
+                  DELETE
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full sm:flex-1 text-[10px] font-bold h-8"
+                  onClick={() => setIsEventDetailsOpen(false)}
+                >
                   CLOSE
                 </Button>
               </div>
@@ -485,93 +561,208 @@ export default function SchedulePage() {
       </Dialog>
 
       {/* Create Event Modal */}
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="bg-background max-w-[400px] p-0 gap-0 rounded-lg overflow-hidden">
-          <DialogHeader className="bg-primary p-4">
-            <DialogTitle className="text-secondary font-bold text-base">
-              {isEditMode ? "EDIT EVENT" : "CREATE EVENT"}
+      <Dialog open={isModalOpen && !isSaveConfirmOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="bg-white max-w-[380px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10">
+            <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
+              {isEditMode ? "Edit Event" : "Create Event"}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="p-5 space-y-2">
+          <form onSubmit={handleSaveEvent} className="p-3 sm:p-4 space-y-2.5 sm:space-y-3">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-xs">
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs">
                 {error}
               </div>
             )}
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">EVENT NAME</label>
+            
+            {/* Event Name */}
+            <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3">
+              <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Event Name *</label>
               <Input 
-                className="h-8 text-sm" 
+                className="h-8 text-xs border-gray-300 focus:ring-secondary" 
                 value={formData.title}
                 onChange={(e) => setFormData({...formData, title: e.target.value})}
-              />
-            </div>
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">DESCRIPTION</label>
-              <Input 
-                className="h-8 text-sm" 
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
-              />
-            </div>
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">LOCATION</label>
-              <Input 
-                className="h-8 text-sm" 
-                value={formData.location}
-                onChange={(e) => setFormData({...formData, location: e.target.value})}
-              />
-            </div>
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">EVENT START DATE</label>
-              <Input 
-                className="h-8 text-sm" 
-                type="datetime-local" 
-                value={formData.start_time}
-                onChange={(e) => setFormData({...formData, start_time: e.target.value})}
-              />
-            </div>
-            <div className="grid grid-cols-[120px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">EVENT END DATE</label>
-              <Input 
-                className="h-8 text-sm" 
-                type="datetime-local" 
-                value={formData.end_time}
-                onChange={(e) => setFormData({...formData, end_time: e.target.value})}
-              />
-            </div>
-            <div className="grid grid-cols-[120px_1fr] items-start gap-2">
-              <label className="text-xs font-semibold text-secondary pt-1">NOTES</label>
-              <textarea 
-                className="h-16 text-sm px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary" 
-                value={formData.notes}
-                onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                placeholder="Enter event name"
+                required
               />
             </div>
 
-            <div className="flex justify-center gap-4 pt-4 border-t border-gray-200 mt-4">
-              <Button className="px-8" onClick={handleSaveEvent}>SAVE</Button>
-              <Button variant="outline" onClick={() => {
-                setIsModalOpen(false);
-                setIsEditMode(false);
-                setSelectedEvent(null);
-                setError(null);
-                setFormData({
-                  title: "",
-                  description: "",
-                  start_time: "",
-                  end_time: "",
-                  location: "",
-                  notes: "",
-                });
-              }}>
+            {/* Description */}
+            <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 border border-blue-200">
+              <label className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5 block">Description</label>
+              <Input 
+                className="h-8 text-xs border-blue-300 focus:ring-blue-500" 
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Enter description"
+              />
+            </div>
+
+            {/* Location */}
+            <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 border border-green-200">
+              <label className="text-[10px] font-bold text-green-700 uppercase tracking-wide mb-1.5 block">Location</label>
+              <Input 
+                className="h-8 text-xs border-green-300 focus:ring-green-500" 
+                value={formData.location}
+                onChange={(e) => setFormData({...formData, location: e.target.value})}
+                placeholder="Enter location"
+              />
+            </div>
+
+            {/* Date & Time */}
+            <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 space-y-2">
+              <div>
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Event Start Date & Time *</label>
+                <Input 
+                  className="h-8 text-xs border-gray-300 focus:ring-secondary" 
+                  type="datetime-local" 
+                  value={formData.start_time}
+                  onChange={(e) => setFormData({...formData, start_time: e.target.value})}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Event End Date & Time *</label>
+                <Input 
+                  className="h-8 text-xs border-gray-300 focus:ring-secondary" 
+                  type="datetime-local" 
+                  value={formData.end_time}
+                  onChange={(e) => setFormData({...formData, end_time: e.target.value})}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 border border-yellow-200">
+              <label className="text-[10px] font-bold text-yellow-700 uppercase tracking-wide mb-1.5 block">Notes</label>
+              <textarea 
+                className="w-full h-16 text-xs px-3 py-2 border border-yellow-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500" 
+                value={formData.notes}
+                onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                placeholder="Enter any additional notes..."
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-2 pt-1.5">
+              <Button 
+                type="submit" 
+                className="w-full sm:flex-1 bg-secondary text-white text-[10px] font-bold hover:bg-secondary/90 h-8"
+              >
+                SAVE
+              </Button>
+              <Button 
+                type="button"
+                variant="outline" 
+                className="w-full sm:flex-1 text-[10px] font-bold h-8"
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setIsEditMode(false);
+                  setSelectedEvent(null);
+                  setError(null);
+                  setFormData({
+                    title: "",
+                    description: "",
+                    start_time: "",
+                    end_time: "",
+                    location: "",
+                    notes: "",
+                  });
+                }}
+              >
                 CANCEL
               </Button>
             </div>
-          </div>
+          </form>
         </DialogContent>
       </Dialog>
+
+      {/* Save Event Confirmation Dialog */}
+      {isSaveConfirmOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsSaveConfirmOpen(false)}
+          />
+
+          {/* Confirmation Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
+                <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2">{isEditMode ? 'Save Changes' : 'Create Event'}</h3>
+              <p className="text-sm text-gray-600 mb-6">
+                {isEditMode 
+                  ? 'Are you sure you want to save the changes to this event?' 
+                  : 'Are you sure you want to create this event?'}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsSaveConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={confirmSaveEvent}
+                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
+                >
+                  {isEditMode ? 'YES, SAVE CHANGES' : 'YES, CREATE'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Event Confirmation Dialog */}
+      {isDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsDeleteConfirmOpen(false)}
+          />
+
+          {/* Confirmation Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2">Delete Event</h3>
+              <p className="text-sm text-gray-600 mb-2">
+                Are you sure you want to delete <span className="font-semibold">"{eventToDelete?.title}"</span>?
+              </p>
+              <p className="text-xs text-gray-500 mb-6">
+                This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsDeleteConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={confirmDeleteEvent}
+                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  YES, DELETE
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

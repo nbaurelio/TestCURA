@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { Search } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -9,12 +10,15 @@ import { SchedulePlanner } from "@/components/sidebar/SchedulePlanner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { getActivityLogs, ActivityLog } from "@/lib/api/activity-logs";
+import { ActivityLogDetailsModal } from "@/components/modals/ActivityLogDetailsModal";
 
 export default function ActivityLogsPage() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const logsPerPage = 25;
 
   useEffect(() => {
@@ -63,6 +67,11 @@ export default function ActivityLogsPage() {
     setCurrentPage(pageNumber);
   };
 
+  const handleLogClick = (log: ActivityLog) => {
+    setSelectedLog(log);
+    setIsDetailsOpen(true);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Header />
@@ -81,6 +90,9 @@ export default function ActivityLogsPage() {
 
         {/* Main Content */}
         <div className="flex-1 bg-white rounded-lg shadow-md p-3 sm:p-5">
+          <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline">
+            ← Back to Home
+          </Link>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 mb-4 sm:mb-6">
             <h1 className="bg-secondary text-white text-xs sm:text-sm font-semibold py-2 px-4 rounded-md">
               ACTIVITY LOGS
@@ -124,7 +136,11 @@ export default function ActivityLogsPage() {
                 </thead>
                 <tbody>
                   {currentLogs.map((log) => (
-                    <tr key={log.id}>
+                    <tr 
+                      key={log.id}
+                      onClick={() => handleLogClick(log)}
+                      className="cursor-pointer hover:opacity-80 transition-opacity"
+                    >
                       <td className="bg-gray-50 py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-l-lg">
                         {formatDateTime(log.created_at)}
                       </td>
@@ -148,7 +164,11 @@ export default function ActivityLogsPage() {
               </div>
             ) : (
               currentLogs.map((log) => (
-                <div key={log.id} className="bg-gray-50 rounded-lg p-3">
+                <div 
+                  key={log.id} 
+                  onClick={() => handleLogClick(log)}
+                  className="bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                >
                   <div className="text-[10px] text-gray-500 mb-1">{formatDateTime(log.created_at)}</div>
                   <div className="text-xs text-gray-700">{log.description}</div>
                 </div>
@@ -203,6 +223,13 @@ export default function ActivityLogsPage() {
       </main>
 
       <Footer />
+
+      {/* Activity Log Details Modal */}
+      <ActivityLogDetailsModal
+        log={selectedLog}
+        isOpen={isDetailsOpen}
+        onClose={() => setIsDetailsOpen(false)}
+      />
     </div>
   );
 }

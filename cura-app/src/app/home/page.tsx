@@ -12,7 +12,7 @@ import { NewPatientReferralModal } from "@/components/modals/NewPatientReferralM
 import { ExistingPatientReferralModal } from "@/components/modals/ExistingPatientReferralModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { getReferrals, deleteReferral, acceptReferral, Referral } from "@/lib/api/referrals";
+import { getReferrals, deleteReferral, acceptReferral, updateReferral, Referral } from "@/lib/api/referrals";
 import { filterTaxonomy, ClinicalSection, ClinicalDiscipline, TreatmentService } from "@/lib/data/filterTaxonomy";
 
 
@@ -22,6 +22,8 @@ export default function HomePage() {
   const [isExistingPatientModalOpen, setIsExistingPatientModalOpen] = useState(false);
   const [isAcceptConfirmOpen, setIsAcceptConfirmOpen] = useState(false);
   const [referralToAccept, setReferralToAccept] = useState<string | null>(null);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [referralToDelete, setReferralToDelete] = useState<string | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [featuredReferrals, setFeaturedReferrals] = useState<Referral[]>([]);
@@ -33,6 +35,7 @@ export default function HomePage() {
   const [selectedDiscipline, setSelectedDiscipline] = useState<string>("");
   const [selectedTreatment, setSelectedTreatment] = useState<string>("");
   const [filteredReferrals, setFilteredReferrals] = useState<Referral[]>([]);
+  const [isAdvancedFilterActive, setIsAdvancedFilterActive] = useState(false);
 
   useEffect(() => {
     loadReferrals();
@@ -103,15 +106,21 @@ export default function HomePage() {
 
   // Apply filters
   const handleSearch = () => {
+    setIsAdvancedFilterActive(true);
     // Start with only non-accepted referrals
     let filtered = referrals.filter(r => r.accepted_by === 'None');
+    
+    console.log('Starting filter with non-accepted referrals:', filtered.length);
 
     if (selectedSection) {
       const section = filterTaxonomy.find(s => s.id === selectedSection);
       if (section) {
-        filtered = filtered.filter(r => 
-          r.clinical_section_destination === section.shortName
-        );
+        console.log('Filtering by section:', section.shortName);
+        filtered = filtered.filter(r => {
+          console.log('Referral section destination:', r.clinical_section_destination);
+          return r.clinical_section_destination === section.shortName;
+        });
+        console.log('After section filter:', filtered.length);
       }
     }
 
@@ -119,9 +128,12 @@ export default function HomePage() {
       const section = filterTaxonomy.find(s => s.id === selectedSection);
       const discipline = section?.clinicalDisciplines.find(d => d.id === selectedDiscipline);
       if (discipline) {
-        filtered = filtered.filter(r => 
-          r.clinical_discipline_destination === discipline.name
-        );
+        console.log('Filtering by discipline:', discipline.name);
+        filtered = filtered.filter(r => {
+          console.log('Referral discipline destination:', r.clinical_discipline_destination);
+          return r.clinical_discipline_destination === discipline.name;
+        });
+        console.log('After discipline filter:', filtered.length);
       }
     }
 
@@ -130,12 +142,16 @@ export default function HomePage() {
       const discipline = section?.clinicalDisciplines.find(d => d.id === selectedDiscipline);
       const treatment = discipline?.treatmentServices.find(t => t.id === selectedTreatment);
       if (treatment) {
-        filtered = filtered.filter(r => 
-          r.treatment_service_destination === treatment.name
-        );
+        console.log('Filtering by treatment:', treatment.name);
+        filtered = filtered.filter(r => {
+          console.log('Referral treatment destination:', r.treatment_service_destination);
+          return r.treatment_service_destination === treatment.name;
+        });
+        console.log('After treatment filter:', filtered.length);
       }
     }
 
+    console.log('Final filtered referrals:', filtered.length);
     setFilteredReferrals(filtered);
   };
 
@@ -144,14 +160,18 @@ export default function HomePage() {
     setSelectedSection("");
     setSelectedDiscipline("");
     setSelectedTreatment("");
+    setIsAdvancedFilterActive(false);
     setFilteredReferrals(referrals);
   };
 
   const handleHeaderSearch = (query: string, category: string) => {
     if (!query.trim()) {
-      setFilteredReferrals(referrals);
+      if (!isAdvancedFilterActive) {
+        setFilteredReferrals(referrals);
+      }
       return;
     }
+    setIsAdvancedFilterActive(false);
 
     const lowerQuery = query.toLowerCase();
     const filtered = referrals.filter(referral => {
@@ -188,17 +208,47 @@ export default function HomePage() {
     loadReferrals();
   };
 
-  const handleDeleteReferral = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this referral?")) {
-      return;
-    }
+  const handleDeleteReferral = (id: string) => {
+    setReferralToDelete(id);
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const confirmDeleteReferral = async () => {
+    if (!referralToDelete) return;
 
     try {
-      await deleteReferral(id);
+      await deleteReferral(referralToDelete);
+      setIsDeleteConfirmOpen(false);
+      setReferralToDelete(null);
       loadReferrals();
     } catch (error) {
       console.error("Error deleting referral:", error);
       alert("Failed to delete referral. Please try again.");
+    }
+  };
+
+  const handleUpdateReferral = async (id: string, updates: Partial<Referral>) => {
+    try {
+      // Convert Referral updates to ReferralFormData format
+      const formDataUpdates = {
+        chart_number: updates.chart_number,
+        treatment: updates.treatment || undefined,
+        age: updates.age || undefined,
+        medical_alert: updates.medical_alert || undefined,
+        clinical_section_origin: updates.clinical_section_origin,
+        clinical_section_destination: updates.clinical_section_destination,
+        clinical_discipline_origin: updates.clinical_discipline_origin || undefined,
+        clinical_discipline_destination: updates.clinical_discipline_destination || undefined,
+        treatment_service_origin: updates.treatment_service_origin || undefined,
+        treatment_service_destination: updates.treatment_service_destination || undefined,
+        medical_history: updates.medical_history || undefined,
+        notes_and_special_indications: updates.notes_and_special_indications || undefined,
+      };
+      await updateReferral(id, formDataUpdates);
+      loadReferrals();
+    } catch (error) {
+      console.error("Error updating referral:", error);
+      alert("Failed to update referral. Please try again.");
     }
   };
 
@@ -272,8 +322,8 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Pinned/Featured Referrals - Accepted with Pending Status */}
-          {referrals.filter(r => r.is_featured && r.status === 'pending').length > 0 && (
+          {/* Pinned/Featured Referrals - Accepted Referrals (Approved and Pending) */}
+          {referrals.filter(r => r.is_featured && (r.status === 'pending' || r.status === 'approved')).length > 0 && (
             <div className="mb-6">
               <div className="bg-gradient-to-r from-primary/20 to-secondary/20 rounded-lg p-3 sm:p-4 border-2 border-primary/30">
                 <div className="flex items-center gap-2 mb-3">
@@ -284,7 +334,13 @@ export default function HomePage() {
                 </div>
                 <div className="space-y-3">
                   {referrals
-                    .filter(r => r.is_featured && r.status === 'pending')
+                    .filter(r => r.is_featured && (r.status === 'pending' || r.status === 'approved'))
+                    .sort((a, b) => {
+                      // Sort approved referrals first, then pending
+                      if (a.status === 'approved' && b.status === 'pending') return -1;
+                      if (a.status === 'pending' && b.status === 'approved') return 1;
+                      return 0;
+                    })
                     .map((referral) => {
                       const age = referral.age || 0;
                       const title = `Referring ${age} yr. old patient for ${referral.clinical_section_destination}`;
@@ -306,7 +362,11 @@ export default function HomePage() {
                           acceptedBy={referral.accepted_by}
                           status={referral.status}
                           showAccept={false}
-                          onUpdate={() => console.log("Update", referral.id)}
+                          createdAt={referral.created_at}
+                          treatment={referral.treatment || undefined}
+                          medicalHistory={referral.medical_history || undefined}
+                          isFeatured={referral.is_featured}
+                          onUpdate={(id, updates) => handleUpdateReferral(id, updates)}
                           onAccept={() => handleAcceptReferral(referral.id)}
                           onDelete={handleDeleteReferral}
                         />
@@ -329,7 +389,13 @@ export default function HomePage() {
               </div>
             ) : (
               filteredReferrals
-                .filter(referral => !(referral.is_featured && referral.status === 'pending'))
+                .filter(referral => {
+                  // Exclude pinned referrals (both pending and approved)
+                  if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
+                    return false;
+                  }
+                  return true;
+                })
                 .map((referral) => {
                   const age = referral.age || 0;
                   const title = `Referring ${age} yr. old patient for ${referral.clinical_section_destination}`;
@@ -351,7 +417,11 @@ export default function HomePage() {
                       acceptedBy={referral.accepted_by}
                       status={referral.status}
                       showAccept={referral.accepted_by === "None"}
-                      onUpdate={() => console.log("Update", referral.id)}
+                      createdAt={referral.created_at}
+                      treatment={referral.treatment || undefined}
+                      medicalHistory={referral.medical_history || undefined}
+                      isFeatured={referral.is_featured}
+                      onUpdate={(id: string, updates: Partial<Referral>) => handleUpdateReferral(id, updates)}
                       onAccept={() => handleAcceptReferral(referral.id)}
                       onDelete={handleDeleteReferral}
                     />
@@ -479,6 +549,7 @@ export default function HomePage() {
                   <div className="mx-4 w-full">
                     {featuredReferrals[currentSlide] && (
                       <FeaturedReferralCard
+                        id={featuredReferrals[currentSlide].id}
                         title={`Referring ${featuredReferrals[currentSlide].age || 0} yr. old patient for ${featuredReferrals[currentSlide].clinical_section_destination}`}
                         medicalAlert={featuredReferrals[currentSlide].medical_alert || undefined}
                         clinicalSectionOrigin={featuredReferrals[currentSlide].clinical_section_origin}
@@ -489,7 +560,15 @@ export default function HomePage() {
                         treatmentServiceDestination={featuredReferrals[currentSlide].treatment_service_destination || undefined}
                         notesAndIndications={featuredReferrals[currentSlide].notes_and_special_indications || undefined}
                         chartNumber={featuredReferrals[currentSlide].chart_number}
+                        acceptedBy={featuredReferrals[currentSlide].accepted_by}
+                        status={featuredReferrals[currentSlide].status}
+                        createdAt={featuredReferrals[currentSlide].created_at}
+                        treatment={featuredReferrals[currentSlide].treatment || undefined}
+                        medicalHistory={featuredReferrals[currentSlide].medical_history || undefined}
+                        isFeatured={featuredReferrals[currentSlide].is_featured}
                         onAccept={() => handleAcceptReferral(featuredReferrals[currentSlide].id)}
+                        onUpdate={(id, updates) => handleUpdateReferral(id, updates)}
+                        onDelete={handleDeleteReferral}
                       />
                     )}
                   </div>
@@ -546,38 +625,85 @@ export default function HomePage() {
         onSave={handleReferralSaved}
       />
 
-      {/* Accept Referral Confirmation Dialog */}
-      <Dialog open={isAcceptConfirmOpen} onOpenChange={setIsAcceptConfirmOpen}>
-        <DialogContent className="bg-[#f5f0e1] max-w-[400px] p-0 gap-0 rounded-lg overflow-hidden border-2 border-primary">
-          {/* Header */}
-          <div className="bg-secondary p-4 text-center">
-            <h2 className="text-white font-bold text-base">CONFIRM ACCEPTANCE</h2>
-          </div>
+      {/* Delete Referral Confirmation Dialog */}
+      {isDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsDeleteConfirmOpen(false)}
+          />
 
-          {/* Content */}
-          <div className="p-6 text-center">
-            <p className="text-secondary text-sm mb-6">
-              Are you sure you want to accept this referral?
-            </p>
-
-            {/* Buttons */}
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={confirmAcceptReferral}
-                className="px-6 py-2 bg-secondary text-white text-sm font-semibold rounded hover:bg-secondary/90 transition-colors"
-              >
-                YES, ACCEPT
-              </button>
-              <button
-                onClick={() => setIsAcceptConfirmOpen(false)}
-                className="px-6 py-2 border-2 border-secondary text-secondary text-sm font-semibold rounded hover:bg-secondary/10 transition-colors"
-              >
-                CANCEL
-              </button>
+          {/* Confirmation Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2">Delete Referral</h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Are you sure you want to delete this referral? This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsDeleteConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={confirmDeleteReferral}
+                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  YES, DELETE
+                </button>
+              </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
+
+      {/* Accept Referral Confirmation Dialog */}
+      {isAcceptConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsAcceptConfirmOpen(false)}
+          />
+
+          {/* Confirmation Modal */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
+                <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2">Confirm Acceptance</h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Are you sure you want to accept this referral?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsAcceptConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={confirmAcceptReferral}
+                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
+                >
+                  YES, ACCEPT
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
