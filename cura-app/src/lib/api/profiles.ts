@@ -8,6 +8,7 @@ export interface Profile {
   avatar_url?: string;
   year_level?: string;
   clinical_department?: string;
+  batch_name?: string;
   role: string;
   created_at: string;
   updated_at: string;

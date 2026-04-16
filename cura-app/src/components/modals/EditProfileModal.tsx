@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Plus } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import Cropper from "react-easy-crop";
+import { Plus, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getMockUserProfile, updateProfile, Profile } from "@/lib/api/profiles";
@@ -27,10 +28,44 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
     last_name: "",
     year_level: "",
     clinical_department: "",
+    batch_name: "",
     email: "",
     avatar_url: "",
   });
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+
+  const onCropComplete = useCallback((_: any, cap: any) => {
+    setCroppedAreaPixels(cap);
+  }, []);
+
+  const getCroppedImg = (src: string, pixelCrop: any): Promise<string> => {
+    return new Promise((resolve) => {
+      const image = new window.Image();
+      image.src = src;
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = pixelCrop.width;
+        canvas.height = pixelCrop.height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, pixelCrop.width, pixelCrop.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+    });
+  };
+
+  const handleCropConfirm = async () => {
+    if (!cropSrc || !croppedAreaPixels) return;
+    const cropped = await getCroppedImg(cropSrc, croppedAreaPixels);
+    setAvatarPreview(cropped);
+    setFormData(prev => ({ ...prev, avatar_url: cropped }));
+    setCropSrc(null);
+    setZoom(1);
+    setCrop({ x: 0, y: 0 });
+  };
 
   useEffect(() => {
     if (open) {
@@ -48,6 +83,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
           last_name: data.last_name,
           year_level: data.year_level || "",
           clinical_department: data.clinical_department || "",
+          batch_name: (data as any).batch_name || "",
           email: data.email,
           avatar_url: data.avatar_url || "",
         });
@@ -82,9 +118,10 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
         last_name: formData.last_name,
         year_level: formData.year_level,
         clinical_department: formData.clinical_department,
+        batch_name: formData.batch_name,
         email: formData.email,
         avatar_url: formData.avatar_url,
-      });
+      } as any);
       
       console.log("Update result:", result);
       
@@ -114,25 +151,100 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64String = reader.result as string;
-        setAvatarPreview(base64String);
-        setFormData({...formData, avatar_url: base64String});
+        setCropSrc(reader.result as string);
+        setZoom(1);
+        setCrop({ x: 0, y: 0 });
       };
       reader.readAsDataURL(file);
     }
+    e.target.value = "";
   };
 
   return (
+    <>
+    {/* Crop Dialog */}
+    <Dialog open={!!cropSrc} onOpenChange={() => { setCropSrc(null); }}>
+      <DialogContent className="bg-white max-w-[380px] w-[92vw] p-0 gap-0 rounded-xl overflow-hidden shadow-xl [&>button:last-child]:hidden">
+        <DialogHeader className="bg-secondary p-3 sticky top-0 z-10">
+          <div className="flex items-start justify-between">
+            <div>
+              <DialogTitle className="text-white font-bold text-xs uppercase tracking-wide">Crop Photo</DialogTitle>
+              <p className="text-white/70 text-[10px] mt-0.5">Drag to reposition · Pinch or scroll to zoom</p>
+            </div>
+            <button type="button" onClick={() => setCropSrc(null)} className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors mt-0.5 shrink-0">
+              <X className="h-3.5 w-3.5 text-white" />
+            </button>
+          </div>
+        </DialogHeader>
+
+        {/* Crop area */}
+        <div className="relative w-full bg-black" style={{ height: 280 }}>
+          {cropSrc && (
+            <Cropper
+              image={cropSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={1}
+              cropShape="round"
+              showGrid={false}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={onCropComplete}
+            />
+          )}
+        </div>
+
+        {/* Zoom controls */}
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setZoom(z => Math.max(1, z - 0.1))} className="p-1.5 rounded-lg border border-gray-300 hover:bg-gray-100 transition-colors">
+              <ZoomOut className="h-4 w-4 text-gray-600" />
+            </button>
+            <input
+              type="range"
+              min={1}
+              max={3}
+              step={0.05}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              className="flex-1 accent-secondary h-1.5 cursor-pointer"
+            />
+            <button type="button" onClick={() => setZoom(z => Math.min(3, z + 0.1))} className="p-1.5 rounded-lg border border-gray-300 hover:bg-gray-100 transition-colors">
+              <ZoomIn className="h-4 w-4 text-gray-600" />
+            </button>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button type="button" onClick={() => setCropSrc(null)} className="flex-1 py-2 text-xs font-bold border-2 border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+              CANCEL
+            </button>
+            <button type="button" onClick={handleCropConfirm} className="flex-1 py-2 text-xs font-bold bg-secondary text-white rounded-lg hover:bg-secondary/90 transition-colors">
+              USE PHOTO
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-white max-w-[380px] w-[92vw] p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto [&>button]:text-white [&>button]:opacity-80 [&>button]:hover:opacity-100 [&>button]:top-3 [&>button]:right-3">
         <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10">
-          <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
-            Edit Profile
-          </DialogTitle>
-          <p className="text-white/70 text-[10px] mt-0.5">Update your profile information</p>
+          <div className="flex items-start justify-between">
+            <div>
+              <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
+                Edit Profile
+              </DialogTitle>
+              <p className="text-white/70 text-[10px] mt-0.5">Update your profile information</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors mt-0.5 shrink-0"
+            >
+              <X className="h-3.5 w-3.5 text-white" />
+            </button>
+          </div>
         </DialogHeader>
 
         <div className="p-3 sm:p-4 space-y-2.5">
@@ -176,22 +288,40 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Year Level</label>
-                <Input
-                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                <select
+                  className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-secondary bg-white"
                   value={formData.year_level}
                   onChange={(e) => setFormData({...formData, year_level: e.target.value})}
-                  placeholder="e.g. 4th Year"
-                />
+                >
+                  <option value="">Select year</option>
+                  <option value="5th yr">5th yr</option>
+                  <option value="6th yr">6th yr</option>
+                  <option value="Residency">Residency</option>
+                </select>
               </div>
               <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Dept.</label>
-                <Input
-                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Shift</label>
+                <select
+                  className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-secondary bg-white"
                   value={formData.clinical_department}
                   onChange={(e) => setFormData({...formData, clinical_department: e.target.value})}
-                  placeholder="e.g. Prostho"
-                />
+                >
+                  <option value="">Select shift</option>
+                  <option value="Oral Medicine (OM)">Oral Medicine (OM)</option>
+                  <option value="Operative Dentistry (OP)">Operative Dentistry (OP)</option>
+                  <option value="Prosthodontics (Prostho)">Prosthodontics (Prostho)</option>
+                  <option value="Postgraduate Orthodontics (Ortho)">Postgraduate Orthodontics (Ortho)</option>
+                </select>
               </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Batch Name</label>
+              <Input
+                className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                value={formData.batch_name}
+                onChange={(e) => setFormData({...formData, batch_name: e.target.value})}
+                placeholder="e.g. Batch 2025"
+              />
             </div>
           </div>
 
@@ -239,5 +369,6 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
         </div>
       </DialogContent>
     </Dialog>
+    </>
   );
 }

@@ -6,6 +6,8 @@ export interface EventFormData {
   start_time: string;
   end_time: string;
   location?: string;
+  patient_name?: string;
+  color?: string;
   notes?: string;
 }
 
@@ -24,6 +26,8 @@ export async function createEvent(data: EventFormData) {
       start_time: data.start_time,
       end_time: data.end_time,
       location: data.location,
+      patient_name: data.patient_name,
+      color: data.color,
       notes: data.notes,
     } as any)
     .select()

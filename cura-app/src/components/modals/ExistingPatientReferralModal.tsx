@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MedicalAlertTagInput } from "@/components/ui/MedicalAlertTagInput";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { createReferral, ReferralFormData } from "@/lib/api/referrals";
 import { filterTaxonomy } from "@/lib/data/filterTaxonomy";
 import { supabase } from "@/lib/supabase";
@@ -460,13 +461,10 @@ export function ExistingPatientReferralModal({
           {/* Notes */}
           <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 border border-yellow-200">
             <label className="text-[10px] font-bold text-yellow-700 uppercase tracking-wide mb-1.5 block">Notes & Special Indications</label>
-            <textarea
-              className={`w-full h-16 text-xs px-3 py-2 border border-yellow-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
-                lookupStatus === "found" ? "bg-white" : "bg-gray-100 cursor-not-allowed"
-              }`}
-              value={formData.notes_and_special_indications}
-              onChange={(e) => handleChange("notes_and_special_indications", e.target.value)}
-              readOnly={lookupStatus !== "found"}
+            <RichTextEditor
+              value={formData.notes_and_special_indications || ""}
+              onChange={(val) => handleChange("notes_and_special_indications", val)}
+              disabled={lookupStatus !== "found"}
               placeholder="Auto-filled from chart"
             />
           </div>

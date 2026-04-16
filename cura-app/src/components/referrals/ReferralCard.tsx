@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -35,11 +36,47 @@ interface ReferralCardProps {
   treatment?: string;
   medicalHistory?: string;
   isFeatured?: boolean;
+  specialCase?: string;
+  tentativeAppointment?: string;
+  age?: number;
   onUpdate?: (id: string, updates: Partial<Referral>) => void;
   onAccept?: (id: string) => void;
   onApprove?: (id: string) => void;
   onDecline?: (id: string) => void;
   onDelete?: (id: string) => void;
+}
+
+function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onCancel}>
+      <DialogContent className="bg-white max-w-sm rounded-2xl shadow-2xl p-6 text-center [&>button:last-child]:hidden">
+        <DialogTitle className="sr-only">Confirm Delete</DialogTitle>
+        <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+          <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-bold text-red-600 mb-2">Delete Referral</h3>
+        <p className="text-sm text-gray-600 mb-6">Are you sure you want to delete this referral? This action cannot be undone.</p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 px-4 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            CANCEL
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
+          >
+            YES, DELETE
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function ReferralCard({
@@ -64,6 +101,9 @@ export function ReferralCard({
   treatment,
   medicalHistory,
   isFeatured,
+  specialCase,
+  tentativeAppointment,
+  age: ageProp,
   onUpdate,
   onAccept,
   onApprove,
@@ -72,12 +112,13 @@ export function ReferralCard({
 }: ReferralCardProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const referralData: Referral = {
     id,
     chart_number: chartNumber || "",
     treatment: treatment || null,
-    age: title ? parseInt(title.match(/(\d+) yr/)?.[1] || "0") : null,
+    age: ageProp ?? (title ? parseInt(title.match(/(\d+) yr/)?.[1] || "0") : null),
     medical_alert: medicalAlert || null,
     clinical_section_origin: clinicalSectionOrigin || "",
     clinical_section_destination: clinicalSectionDestination || "",
@@ -85,6 +126,8 @@ export function ReferralCard({
     clinical_discipline_destination: clinicalDisciplineDestination || null,
     treatment_service_origin: treatmentServiceOrigin || null,
     treatment_service_destination: treatmentServiceDestination || null,
+    special_case: specialCase || null,
+    tentative_appointment_schedule: tentativeAppointment || null,
     medical_history: medicalHistory || null,
     notes_and_special_indications: notesAndIndications || null,
     status: status || "pending",
@@ -132,8 +175,13 @@ export function ReferralCard({
               </div>
             )}
             
-            {notesAndIndications && <p className="bg-muted p-2 rounded border border-gray-300"><span className="font-semibold">Notes and Special Indications:</span> {notesAndIndications}</p>}
-            {chartNumber && <p><span className="font-semibold text-secondary">Chart Number:</span> {chartNumber}</p>}
+            {notesAndIndications && (
+              <div className="bg-muted p-2 rounded border border-gray-300">
+                <span className="font-semibold">Notes and Special Indications: </span>
+                <span className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4" dangerouslySetInnerHTML={{ __html: notesAndIndications }} />
+              </div>
+            )}
+            {chartNumber && acceptedBy && acceptedBy !== 'None' && <p><span className="font-semibold text-secondary">Chart Number:</span> {chartNumber}</p>}
             {acceptedBy && <p><span className="font-semibold text-secondary">Accepted by:</span> {acceptedBy}</p>}
           </div>
         </div>
@@ -202,7 +250,7 @@ export function ReferralCard({
               <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
               <DropdownMenuItem 
                 className="text-red-600"
-                onClick={() => onDelete?.(id)}
+                onClick={() => setIsDeleteConfirmOpen(true)}
               >
                 Delete
               </DropdownMenuItem>
@@ -210,6 +258,11 @@ export function ReferralCard({
           </DropdownMenu>
         </div>
       </div>
+      <DeleteConfirmDialog
+        open={isDeleteConfirmOpen}
+        onCancel={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={() => { setIsDeleteConfirmOpen(false); onDelete?.(id); }}
+      />
       <ViewDetailsModal referral={referralData} isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} />
       <EditReferralModal referral={referralData} isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSave={(id, updates) => { onUpdate?.(id, updates); setIsEditOpen(false); }} />
     </div>
@@ -234,6 +287,9 @@ interface FeaturedReferralCardProps {
   treatment?: string;
   medicalHistory?: string;
   isFeatured?: boolean;
+  specialCase?: string;
+  tentativeAppointment?: string;
+  age?: number;
   initiallyReferredBy?: string;
   approvedBy?: string;
   currentlyReferredBy?: string;
@@ -261,6 +317,9 @@ export function FeaturedReferralCard({
   treatment,
   medicalHistory,
   isFeatured,
+  specialCase,
+  tentativeAppointment,
+  age: agePropFeatured,
   initiallyReferredBy,
   approvedBy,
   currentlyReferredBy,
@@ -271,12 +330,13 @@ export function FeaturedReferralCard({
 }: FeaturedReferralCardProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const referralData: Referral = {
     id,
     chart_number: chartNumber || "",
     treatment: treatment || null,
-    age: title ? parseInt(title.match(/(\d+) yr/)?.[1] || "0") : null,
+    age: agePropFeatured ?? (title ? parseInt(title.match(/(\d+) yr/)?.[1] || "0") : null),
     medical_alert: medicalAlert || null,
     clinical_section_origin: clinicalSectionOrigin || "",
     clinical_section_destination: clinicalSectionDestination || "",
@@ -284,6 +344,8 @@ export function FeaturedReferralCard({
     clinical_discipline_destination: clinicalDisciplineDestination || null,
     treatment_service_origin: treatmentServiceOrigin || null,
     treatment_service_destination: treatmentServiceDestination || null,
+    special_case: specialCase || null,
+    tentative_appointment_schedule: tentativeAppointment || null,
     medical_history: medicalHistory || null,
     notes_and_special_indications: notesAndIndications || null,
     status: status || "pending",
@@ -307,7 +369,7 @@ export function FeaturedReferralCard({
             <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
             <DropdownMenuItem 
               className="text-red-600"
-              onClick={() => onDelete?.(id)}
+              onClick={() => setIsDeleteConfirmOpen(true)}
             >
               Delete
             </DropdownMenuItem>
@@ -315,7 +377,7 @@ export function FeaturedReferralCard({
         </DropdownMenu>
       </div>
 
-      <h4 className="text-secondary font-bold text-sm underline cursor-pointer mb-4 leading-tight pr-8">
+      <h4 className="text-secondary font-bold text-sm mb-4 leading-tight pr-8">
         {title}
       </h4>
       <div className="text-xs space-y-2.5 text-gray-700">
@@ -351,9 +413,12 @@ export function FeaturedReferralCard({
         )}
         
         {notesAndIndications && (
-          <p className="bg-muted p-2 rounded border border-gray-300"><span className="font-semibold">Notes:</span> {notesAndIndications}</p>
+          <div className="bg-muted p-2 rounded border border-gray-300">
+            <span className="font-semibold">Notes: </span>
+            <span className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4" dangerouslySetInnerHTML={{ __html: notesAndIndications }} />
+          </div>
         )}
-        {chartNumber && (
+        {chartNumber && acceptedBy && acceptedBy !== 'None' && (
           <p><span className="font-semibold text-secondary">Chart:</span> {chartNumber}</p>
         )}
         {initiallyReferredBy && (
@@ -377,6 +442,11 @@ export function FeaturedReferralCard({
           ACCEPT
         </button>
       )}
+      <DeleteConfirmDialog
+        open={isDeleteConfirmOpen}
+        onCancel={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={() => { setIsDeleteConfirmOpen(false); onDelete?.(id); }}
+      />
       <ViewDetailsModal referral={referralData} isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} />
       <EditReferralModal referral={referralData} isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSave={(id, updates) => { onUpdate?.(id, updates); setIsEditOpen(false); }} />
     </div>

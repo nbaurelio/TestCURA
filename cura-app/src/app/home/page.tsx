@@ -236,27 +236,18 @@ export default function HomePage() {
   };
 
   const handleUpdateReferral = async (id: string, updates: Partial<Referral>) => {
+    // Optimistic update — instantly reflect changes in UI
+    setReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    setFilteredReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    setFeaturedReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     try {
-      // Convert Referral updates to ReferralFormData format
-      const formDataUpdates = {
-        chart_number: updates.chart_number,
-        treatment: updates.treatment || undefined,
-        age: updates.age || undefined,
-        medical_alert: updates.medical_alert || undefined,
-        clinical_section_origin: updates.clinical_section_origin,
-        clinical_section_destination: updates.clinical_section_destination,
-        clinical_discipline_origin: updates.clinical_discipline_origin || undefined,
-        clinical_discipline_destination: updates.clinical_discipline_destination || undefined,
-        treatment_service_origin: updates.treatment_service_origin || undefined,
-        treatment_service_destination: updates.treatment_service_destination || undefined,
-        medical_history: updates.medical_history || undefined,
-        notes_and_special_indications: updates.notes_and_special_indications || undefined,
-      };
-      await updateReferral(id, formDataUpdates);
+      await updateReferral(id, updates as any);
       loadReferrals();
-    } catch (error) {
-      console.error("Error updating referral:", error);
-      alert("Failed to update referral. Please try again.");
+    } catch (error: any) {
+      console.error("Error updating referral (full):", JSON.stringify(error, null, 2));
+      loadReferrals();
+      const msg = error?.message || error?.error_description || JSON.stringify(error);
+      alert(`Failed to update referral: ${msg}`);
     }
   };
 
@@ -387,6 +378,9 @@ export default function HomePage() {
                       treatment={referral.treatment || undefined}
                       medicalHistory={referral.medical_history || undefined}
                       isFeatured={referral.is_featured}
+                      specialCase={referral.special_case || undefined}
+                      tentativeAppointment={referral.tentative_appointment_schedule || undefined}
+                      age={referral.age ?? undefined}
                       onUpdate={(id: string, updates: Partial<Referral>) => handleUpdateReferral(id, updates)}
                       onAccept={() => handleAcceptReferral(referral.id)}
                       onDelete={handleDeleteReferral}
@@ -534,6 +528,9 @@ export default function HomePage() {
                         treatment={featuredReferrals[currentSlide].treatment || undefined}
                         medicalHistory={featuredReferrals[currentSlide].medical_history || undefined}
                         isFeatured={featuredReferrals[currentSlide].is_featured}
+                        specialCase={featuredReferrals[currentSlide].special_case || undefined}
+                        tentativeAppointment={featuredReferrals[currentSlide].tentative_appointment_schedule || undefined}
+                        age={featuredReferrals[currentSlide].age ?? undefined}
                         onAccept={() => handleAcceptReferral(featuredReferrals[currentSlide].id)}
                         onUpdate={(id, updates) => handleUpdateReferral(id, updates)}
                         onDelete={handleDeleteReferral}

@@ -6,6 +6,7 @@ import { Referral } from "@/lib/api/referrals";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MedicalAlertTagInput } from "@/components/ui/MedicalAlertTagInput";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { filterTaxonomy } from "@/lib/data/filterTaxonomy";
 import {
   Dialog,
@@ -77,7 +78,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
         setSelectedDisciplineDestination(disciplineDestination?.id || "");
       }
     }
-  }, [referral, isOpen]);
+  }, [referral?.id, isOpen]);
 
   if (!isOpen || !referral) return null;
 
@@ -151,23 +152,17 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
     }));
   };
 
-  const handleTreatmentOriginChange = (treatmentId: string) => {
-    const section = filterTaxonomy.find(s => s.id === selectedSectionOrigin);
-    const discipline = section?.clinicalDisciplines.find(d => d.id === selectedDisciplineOrigin);
-    const treatment = discipline?.treatmentServices.find(t => t.id === treatmentId);
+  const handleTreatmentOriginChange = (treatmentName: string) => {
     setFormData(prev => ({
       ...prev,
-      treatment_service_origin: treatment?.name || "",
+      treatment_service_origin: treatmentName,
     }));
   };
 
-  const handleTreatmentDestinationChange = (treatmentId: string) => {
-    const section = filterTaxonomy.find(s => s.id === selectedSectionDestination);
-    const discipline = section?.clinicalDisciplines.find(d => d.id === selectedDisciplineDestination);
-    const treatment = discipline?.treatmentServices.find(t => t.id === treatmentId);
+  const handleTreatmentDestinationChange = (treatmentName: string) => {
     setFormData(prev => ({
       ...prev,
-      treatment_service_destination: treatment?.name || "",
+      treatment_service_destination: treatmentName,
     }));
   };
 
@@ -206,6 +201,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
     onSave(referral.id, {
       ...formData,
       age: formData.age ? parseInt(formData.age) : null,
+      tentative_appointment_schedule: formData.tentative_appointment_schedule || null,
     });
     setIsConfirmOpen(false);
     onClose();
@@ -213,7 +209,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="bg-white max-w-[420px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto [&>button:last-child]:hidden">
           <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10 flex flex-row items-start justify-between">
             <div>
@@ -345,7 +341,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
                 >
                   <option value="">Select Treatment Service</option>
                   {getAvailableTreatmentsDestination().map(treatment => (
-                    <option key={treatment.id} value={treatment.id}>{treatment.name}</option>
+                    <option key={treatment.id} value={treatment.name}>{treatment.name}</option>
                   ))}
                 </select>
               </div>
@@ -375,10 +371,9 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
             {/* Notes & Special Indications */}
             <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 border border-yellow-200">
               <label className="text-[10px] font-bold text-yellow-700 uppercase tracking-wide mb-1.5 block">Notes & Special Indications</label>
-              <textarea
-                className="w-full h-16 text-xs px-3 py-2 border border-yellow-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                value={formData.notes_and_special_indications}
-                onChange={(e) => setFormData(prev => ({ ...prev, notes_and_special_indications: e.target.value }))}
+              <RichTextEditor
+                value={formData.notes_and_special_indications || ""}
+                onChange={(val) => setFormData(prev => ({ ...prev, notes_and_special_indications: val }))}
                 placeholder="Enter any notes or special indications..."
               />
             </div>
@@ -403,39 +398,37 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
 
           </form>
         </DialogContent>
-      </Dialog>
+    </Dialog>
 
-      {/* Confirmation Dialog */}
-      {isConfirmOpen && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsConfirmOpen(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
-            <div className="text-center">
-              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
-                <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-bold text-secondary mb-2">Save Changes</h3>
-              <p className="text-sm text-gray-600 mb-6">Are you sure you want to save the changes to this referral?</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setIsConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  CANCEL
-                </button>
-                <button
-                  onClick={confirmSave}
-                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
-                >
-                  YES, SAVE CHANGES
-                </button>
-              </div>
-            </div>
-          </div>
+    {/* Separate confirmation dialog */}
+    <Dialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
+      <DialogContent className="bg-white max-w-sm rounded-2xl shadow-2xl p-6 text-center [&>button:last-child]:hidden">
+        <DialogTitle className="sr-only">Confirm Save</DialogTitle>
+        <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
+          <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
         </div>
-      )}
+        <h3 className="text-lg font-bold text-secondary mb-2">Save Changes</h3>
+        <p className="text-sm text-gray-600 mb-6">Are you sure you want to save the changes to this referral?</p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => setIsConfirmOpen(false)}
+            className="flex-1 px-4 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            CANCEL
+          </button>
+          <button
+            type="button"
+            onClick={confirmSave}
+            className="flex-1 px-4 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
+          >
+            YES, SAVE
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

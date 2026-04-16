@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { getEvents } from "@/lib/api/events";
 import { getProfile } from "@/lib/api/profiles";
 
@@ -12,6 +12,7 @@ interface Event {
   start_time: string;
   end_time: string;
   location?: string;
+  color?: string;
   notes?: string;
 }
 
@@ -22,6 +23,7 @@ interface SchedulePlannerProps {
 export function SchedulePlanner({
   userName,
 }: SchedulePlannerProps) {
+  const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [userFirstName, setUserFirstName] = useState<string>(userName || "[USER]");
@@ -87,8 +89,7 @@ export function SchedulePlanner({
   };
 
   return (
-    <Link href="/schedule" className="block">
-      <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow overflow-hidden cursor-pointer hover:border-accent transition-colors">
+    <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow overflow-hidden">
         <h3 className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center uppercase tracking-wide">
           {userFirstName}&apos;s Schedule
         </h3>
@@ -102,30 +103,40 @@ export function SchedulePlanner({
             events.map((event) => (
               <div key={event.id} className="mb-3 last:mb-0">
                 <div className="mb-2">
-                  <span className="bg-secondary text-white text-[10px] font-bold py-1.5 px-3 rounded inline-block uppercase tracking-wide">
+                  <span
+                    className="text-white text-[10px] font-bold py-1.5 px-3 rounded inline-block uppercase tracking-wide"
+                    style={{ backgroundColor: event.color || '#1e3a5f' }}
+                  >
                     {formatDate(event.start_time)}
                   </span>
                 </div>
 
-                <div className="bg-white rounded p-3 border-2 border-gray-300">
-                  <div className="text-xs font-bold text-secondary mb-1">
+                <div
+                  onClick={() => router.push(`/schedule?event=${event.id}`)}
+                  className="bg-white rounded p-3 border-l-4 cursor-pointer hover:brightness-95 transition-all"
+                  style={{ borderColor: event.color || '#1e3a5f', borderWidth: '0 0 0 4px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+                >
+                  <div className="text-xs font-bold mb-1" style={{ color: event.color || '#1e3a5f' }}>
                     {formatTime(event.start_time, event.end_time)}
                   </div>
-                  <div className="text-sm font-semibold text-secondary mb-1">
+                  <div className="text-sm font-semibold mb-1" style={{ color: event.color || '#1e3a5f' }}>
                     {event.title}
                   </div>
                   {event.location && (
                     <div className="text-xs text-muted-foreground">{event.location}</div>
                   )}
                   {event.notes && (
-                    <div className="text-xs text-info italic mt-1">{event.notes}</div>
+                    <div
+                      className="text-xs italic mt-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
+                      style={{ color: event.color || '#1e3a5f' }}
+                      dangerouslySetInnerHTML={{ __html: event.notes }}
+                    />
                   )}
                 </div>
               </div>
             ))
           )}
         </div>
-      </div>
-    </Link>
+    </div>
   );
 }

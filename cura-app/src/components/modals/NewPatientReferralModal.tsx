@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MedicalAlertTagInput } from "@/components/ui/MedicalAlertTagInput";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { createReferral, ReferralFormData } from "@/lib/api/referrals";
 import { filterTaxonomy } from "@/lib/data/filterTaxonomy";
 import { getNextChartNumber } from "@/lib/api/referrals";
@@ -305,7 +306,7 @@ export function NewPatientReferralModal({
           <div className="bg-red-50 rounded-lg p-2.5 sm:p-3 border border-red-200">
             <label className="text-[10px] font-bold text-red-700 uppercase tracking-wide mb-1.5 block">Medical Alert</label>
             <MedicalAlertTagInput
-              value={formData.medical_alert}
+              value={formData.medical_alert ?? ""}
               onChange={(val) => handleChange("medical_alert", val)}
             />
           </div>
@@ -416,10 +417,9 @@ export function NewPatientReferralModal({
           {/* Notes */}
           <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 border border-yellow-200">
             <label className="text-[10px] font-bold text-yellow-700 uppercase tracking-wide mb-1.5 block">Notes & Special Indications</label>
-            <textarea
-              className="w-full h-16 text-xs px-3 py-2 border border-yellow-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
-              value={formData.notes_and_special_indications}
-              onChange={(e) => handleChange("notes_and_special_indications", e.target.value)}
+            <RichTextEditor
+              value={formData.notes_and_special_indications || ""}
+              onChange={(val) => handleChange("notes_and_special_indications", val)}
               placeholder="Enter any notes or special indications..."
             />
           </div>
