@@ -53,7 +53,7 @@ export function ProfileCard({
 
   if (loading) {
     return (
-      <div className="bg-primary/40 rounded-2xl p-4 text-center">
+      <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow p-5 text-center">
         <div className="h-20 w-20 mx-auto mb-3 rounded-full bg-gray-200 animate-pulse" />
         <div className="h-4 bg-gray-200 rounded animate-pulse mb-2" />
         <div className="h-3 bg-gray-200 rounded animate-pulse" />
@@ -62,21 +62,22 @@ export function ProfileCard({
   }
 
   return (
-    <div className="bg-primary/40 rounded-2xl p-4 text-center">
-      <Avatar className="h-20 w-20 mx-auto mb-3 rounded-full border-4 border-white">
+    <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow p-5 text-center">
+      <Avatar className="h-20 w-20 mx-auto mb-4 rounded-full border-3 border-gray-300 shadow-sm">
         <AvatarImage src={displayAvatarUrl} />
-        <AvatarFallback className="bg-amber-200 text-amber-800 text-lg font-semibold">
+        <AvatarFallback className="bg-muted text-secondary text-lg font-bold">
           {getInitials(displayName)}
         </AvatarFallback>
       </Avatar>
-      <h2 className="text-sm font-bold text-secondary mb-1">{displayName}</h2>
-      <p className="text-xs text-gray-600 mb-2">{displayDepartment} | {displayYearLevel}</p>
-      <div className="flex justify-center gap-4 mt-3">
-        <Link href="/schedule" className="text-secondary hover:text-secondary/80">
-          <Calendar className="h-5 w-5" />
+      <h2 className="text-sm font-bold text-secondary mb-2 uppercase tracking-wide">{displayName}</h2>
+      <p className="text-xs text-muted-foreground mb-3 font-medium">{displayDepartment}</p>
+      <p className="text-xs text-muted-foreground mb-4 font-medium">{displayYearLevel}</p>
+      <div className="flex justify-center gap-3 mt-4 pt-4 border-t border-gray-300">
+        <Link href="/schedule" className="p-2 rounded bg-muted hover:bg-accent hover:text-white transition-colors">
+          <Calendar className="h-4 w-4" />
         </Link>
-        <Link href="/profiles" className="text-secondary hover:text-secondary/80">
-          <Users className="h-5 w-5" />
+        <Link href="/profiles" className="p-2 rounded bg-muted hover:bg-accent hover:text-white transition-colors">
+          <Users className="h-4 w-4" />
         </Link>
       </div>
     </div>

@@ -88,41 +88,43 @@ export function SchedulePlanner({
 
   return (
     <Link href="/schedule" className="block">
-      <div className="bg-[#c5ddf5] rounded-2xl p-4 cursor-pointer hover:bg-[#b8d4f0] transition-colors">
-        <h3 className="bg-secondary text-white text-xs font-bold py-2.5 px-4 rounded-lg mb-4 text-center">
-          {userFirstName}&apos;s Schedule Planner
+      <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow overflow-hidden cursor-pointer hover:border-accent transition-colors">
+        <h3 className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center uppercase tracking-wide">
+          {userFirstName}&apos;s Schedule
         </h3>
 
-        {loading ? (
-          <div className="text-center text-xs text-gray-600 py-4">Loading events...</div>
-        ) : events.length === 0 ? (
-          <div className="text-center text-xs text-gray-600 py-4">No upcoming events</div>
-        ) : (
-          events.map((event) => (
-            <div key={event.id} className="mb-3">
-              <div className="mb-2">
-                <span className="bg-secondary text-white text-[11px] font-bold py-1.5 px-3 rounded-md inline-block">
-                  {formatDate(event.start_time)}
-                </span>
-              </div>
+        <div className="p-4">
+          {loading ? (
+            <div className="text-center text-xs text-muted-foreground py-4">Loading events...</div>
+          ) : events.length === 0 ? (
+            <div className="text-center text-xs text-muted-foreground py-4">No upcoming events</div>
+          ) : (
+            events.map((event) => (
+              <div key={event.id} className="mb-3 last:mb-0">
+                <div className="mb-2">
+                  <span className="bg-secondary text-white text-[10px] font-bold py-1.5 px-3 rounded inline-block uppercase tracking-wide">
+                    {formatDate(event.start_time)}
+                  </span>
+                </div>
 
-              <div className="bg-white/80 rounded-xl p-3 mb-3 shadow-sm">
-                <div className="text-sm font-bold text-secondary">
-                  {formatTime(event.start_time, event.end_time)}
+                <div className="bg-white rounded p-3 border-2 border-gray-300">
+                  <div className="text-xs font-bold text-secondary mb-1">
+                    {formatTime(event.start_time, event.end_time)}
+                  </div>
+                  <div className="text-sm font-semibold text-secondary mb-1">
+                    {event.title}
+                  </div>
+                  {event.location && (
+                    <div className="text-xs text-muted-foreground">{event.location}</div>
+                  )}
+                  {event.notes && (
+                    <div className="text-xs text-info italic mt-1">{event.notes}</div>
+                  )}
                 </div>
-                <div className="text-sm font-semibold text-secondary">
-                  {event.title}
-                </div>
-                {event.location && (
-                  <div className="text-xs text-gray-500">{event.location}</div>
-                )}
-                {event.notes && (
-                  <div className="text-xs text-[#5a8ac4] italic mt-1">{event.notes}</div>
-                )}
               </div>
-            </div>
-          ))
-        )}
+            ))
+          )}
+        </div>
       </div>
     </Link>
   );

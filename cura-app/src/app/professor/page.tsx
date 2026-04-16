@@ -129,8 +129,19 @@ export default function ProfessorDashboard() {
   const statusTabs: ReferralStatus[] = ["ALL", "PENDING", "APPROVED", "DECLINED", "ONGOING", "COMPLETED"];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <Header />
+    <div className="min-h-screen flex flex-col relative">
+      {/* Background Image */}
+      <div 
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg-homepage.png)' }}
+      />
+      
+      {/* White Opaque Overlay */}
+      <div className="fixed inset-0 z-0 bg-white/60" />
+      
+      {/* Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <Header />
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-6">
         <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
@@ -141,15 +152,15 @@ export default function ProfessorDashboard() {
           </div>
 
           {/* Main Content - Referrals */}
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <div className="bg-white/60 backdrop-blur-sm rounded shadow-lg border-2 border-gray-300 overflow-hidden">
             {/* Filter Header */}
-            <div className="bg-gray-50 border-b border-gray-200 px-6 py-5">
+            <div className="bg-muted border-b-2 border-gray-300 px-6 py-5">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-bold text-secondary uppercase tracking-wide">Filter by Status</h2>
                 <select
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-4 py-2 border-2 border-gray-300 rounded-lg text-sm font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-white"
+                  className="px-4 py-2 border-2 border-gray-300 rounded text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-accent bg-white uppercase tracking-wide"
                 >
                   <option>Active</option>
                   <option>All</option>
@@ -162,10 +173,10 @@ export default function ProfessorDashboard() {
                   <button
                     key={status}
                     onClick={() => setActiveStatus(status)}
-                    className={`px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${
+                    className={`px-5 py-2.5 rounded text-xs font-bold uppercase tracking-wide transition-all ${
                       activeStatus === status
-                        ? "bg-secondary text-white shadow-md"
-                        : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
+                        ? "bg-secondary text-white shadow"
+                        : "bg-white text-gray-700 hover:bg-muted border-2 border-gray-300"
                     }`}
                   >
                     {status}
@@ -175,15 +186,15 @@ export default function ProfessorDashboard() {
             </div>
 
             {/* Referrals List */}
-            <div className="p-6 space-y-4 overflow-y-auto">
+            <div className="p-6 space-y-3 overflow-y-auto">
               {loading ? (
-                <div className="text-center py-8 text-gray-500">Loading referrals...</div>
+                <div className="text-center py-8 text-muted-foreground">Loading referrals...</div>
               ) : filteredReferrals.length > 0 ? (
                 filteredReferrals.map((referral) => (
                   <ReferralCard
                     key={referral.id}
                     id={referral.id}
-                    title={`Referring ${referral.age} yr. old patient for ${referral.clinical_section_destination}`}
+                    title={`Referring ${referral.age} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
                     medicalAlert={referral.medical_alert || undefined}
                     clinicalSectionOrigin={referral.clinical_section_origin || undefined}
                     clinicalSectionDestination={referral.clinical_section_destination}
@@ -205,7 +216,7 @@ export default function ProfessorDashboard() {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">
+                <div className="text-center py-8 text-muted-foreground">
                   No referrals found for the selected filter
                 </div>
               )}
@@ -224,27 +235,27 @@ export default function ProfessorDashboard() {
           />
 
           {/* Confirmation Modal */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
             <div className="text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
                 <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h3 className="text-lg font-bold text-secondary mb-2">Approve Referral</h3>
-              <p className="text-sm text-gray-600 mb-6">
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Approve Referral</h3>
+              <p className="text-sm text-muted-foreground mb-6">
                 Are you sure you want to approve this referral?
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setIsApproveConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
                 >
                   CANCEL
                 </button>
                 <button
                   onClick={confirmApproveReferral}
-                  className="flex-1 px-6 py-2 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition-colors"
+                  className="flex-1 px-6 py-2 bg-success text-white text-xs font-bold rounded hover:bg-success/90 transition-colors shadow uppercase tracking-wide"
                 >
                   YES, APPROVE
                 </button>
@@ -264,27 +275,27 @@ export default function ProfessorDashboard() {
           />
 
           {/* Confirmation Modal */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
             <div className="text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
                 <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
-              <h3 className="text-lg font-bold text-secondary mb-2">Decline Referral</h3>
-              <p className="text-sm text-gray-600 mb-6">
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Decline Referral</h3>
+              <p className="text-sm text-muted-foreground mb-6">
                 Are you sure you want to decline this referral?
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setIsDeclineConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
                 >
                   CANCEL
                 </button>
                 <button
                   onClick={confirmDeclineReferral}
-                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
+                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded hover:bg-red-700 transition-colors shadow uppercase tracking-wide"
                 >
                   YES, DECLINE
                 </button>
@@ -294,7 +305,8 @@ export default function ProfessorDashboard() {
         </div>
       )}
 
-      <Footer />
+        <Footer />
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getMockUserProfile, updateProfile, Profile } from "@/lib/api/profiles";
@@ -127,15 +127,18 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-background max-w-[380px] p-0 gap-0 rounded-lg overflow-hidden">
-        <DialogHeader className="bg-primary p-4">
-          <DialogTitle className="text-secondary font-bold text-base">
-            EDIT PROFILE
+      <DialogContent className="bg-white max-w-[380px] w-[92vw] p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto [&>button]:text-white [&>button]:opacity-80 [&>button]:hover:opacity-100 [&>button]:top-3 [&>button]:right-3">
+        <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10">
+          <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
+            Edit Profile
           </DialogTitle>
+          <p className="text-white/70 text-[10px] mt-0.5">Update your profile information</p>
         </DialogHeader>
 
-        <div className="p-5">
-          <div className="flex justify-center mb-5">
+        <div className="p-3 sm:p-4 space-y-2.5">
+
+          {/* Avatar */}
+          <div className="flex justify-center py-2">
             <div className="relative">
               <input
                 type="file"
@@ -144,71 +147,92 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
                 onChange={handleAvatarChange}
                 className="hidden"
               />
+              <Avatar className="h-20 w-20 rounded-2xl border-2 border-gray-200 shadow-md">
+                <AvatarImage src={avatarPreview || profile?.avatar_url || "https://via.placeholder.com/100x100/d4a574/ffffff?text=JD"} />
+                <AvatarFallback className="rounded-2xl bg-gradient-to-br from-accent to-secondary text-white font-bold text-lg">{getInitials()}</AvatarFallback>
+              </Avatar>
               <label
                 htmlFor="avatar-upload"
-                className="absolute -top-2 -left-2 w-7 h-7 bg-white border-2 border-secondary rounded-full flex items-center justify-center z-10 hover:bg-gray-100 cursor-pointer"
+                className="absolute -bottom-2 -right-2 w-7 h-7 bg-secondary rounded-full flex items-center justify-center shadow-md cursor-pointer hover:bg-secondary/90 transition-colors"
               >
-                <Plus className="h-4 w-4 text-secondary" />
+                <Plus className="h-3.5 w-3.5 text-white" />
               </label>
-              <Avatar className="h-[100px] w-[100px] rounded-[20px]">
-                <AvatarImage src={avatarPreview || profile?.avatar_url || "https://via.placeholder.com/100x100/d4a574/ffffff?text=JD"} />
-                <AvatarFallback className="rounded-[20px]">{getInitials()}</AvatarFallback>
-              </Avatar>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-8 gap-y-3 mb-5 pb-5 border-b border-gray-200">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-secondary">First Name</label>
-              <span className="text-sm text-gray-700 font-medium">{formData.first_name}</span>
+          {/* Personal Info */}
+          <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 space-y-2">
+            <label className="text-[10px] font-bold text-secondary uppercase tracking-wide block">Personal Info</label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">First Name</label>
+                <p className="text-xs font-semibold text-secondary bg-white border border-gray-200 rounded-lg px-2.5 py-1.5">{formData.first_name || "—"}</p>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Last Name</label>
+                <p className="text-xs font-semibold text-secondary bg-white border border-gray-200 rounded-lg px-2.5 py-1.5">{formData.last_name || "—"}</p>
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-secondary">Last Name</label>
-              <span className="text-sm text-gray-700 font-medium">{formData.last_name}</span>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-secondary">Year Level</label>
-              <Input 
-                className="h-8 text-sm" 
-                value={formData.year_level}
-                onChange={(e) => setFormData({...formData, year_level: e.target.value})}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-secondary">Clinical Department</label>
-              <Input 
-                className="h-8 text-sm" 
-                value={formData.clinical_department}
-                onChange={(e) => setFormData({...formData, clinical_department: e.target.value})}
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Year Level</label>
+                <Input
+                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                  value={formData.year_level}
+                  onChange={(e) => setFormData({...formData, year_level: e.target.value})}
+                  placeholder="e.g. 4th Year"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Dept.</label>
+                <Input
+                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                  value={formData.clinical_department}
+                  onChange={(e) => setFormData({...formData, clinical_department: e.target.value})}
+                  placeholder="e.g. Prostho"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="space-y-2.5 mb-5">
-            <div className="grid grid-cols-[150px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">Email Address</label>
-              <Input 
-                className="h-8 text-sm" 
-                type="email" 
+          {/* Account */}
+          <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 border border-blue-200 space-y-2">
+            <label className="text-[10px] font-bold text-blue-700 uppercase tracking-wide block">Account</label>
+            <div>
+              <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Email Address</label>
+              <Input
+                className="h-8 text-xs border-blue-300 focus:ring-blue-500"
+                type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({...formData, email: e.target.value})}
+                placeholder="your@email.com"
               />
             </div>
-            <div className="grid grid-cols-[150px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">Password</label>
-              <Input className="h-8 text-sm" type="password" placeholder="Leave blank to keep current" />
+            <div>
+              <label className="text-[10px] font-semibold text-blue-500 mb-1 block">New Password</label>
+              <Input className="h-8 text-xs border-blue-300 focus:ring-blue-500" type="password" placeholder="Leave blank to keep current" />
             </div>
-            <div className="grid grid-cols-[150px_1fr] items-center gap-2">
-              <label className="text-xs font-semibold text-secondary">Password Confirmation</label>
-              <Input className="h-8 text-sm" type="password" placeholder="Leave blank to keep current" />
+            <div>
+              <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Confirm Password</label>
+              <Input className="h-8 text-xs border-blue-300 focus:ring-blue-500" type="password" placeholder="Leave blank to keep current" />
             </div>
           </div>
 
-          <div className="flex justify-center gap-4 pt-4 border-t border-gray-200">
-            <Button className="px-8" onClick={handleSave} disabled={loading}>
-              {loading ? "SAVING..." : "SAVE"}
+          {/* Action Buttons */}
+          <div className="flex flex-row gap-2 pt-1.5 w-full">
+            <Button
+              className="flex-1 bg-secondary hover:bg-secondary/90 text-white text-[10px] font-bold uppercase h-8 disabled:opacity-50"
+              onClick={handleSave}
+              disabled={loading}
+            >
+              {loading ? "SAVING..." : "SAVE CHANGES"}
             </Button>
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
+            <Button
+              variant="outline"
+              className="flex-1 text-[10px] font-bold h-8"
+              onClick={() => onOpenChange(false)}
+              disabled={loading}
+            >
               CANCEL
             </Button>
           </div>

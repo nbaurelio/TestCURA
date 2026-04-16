@@ -29,44 +29,48 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
       {/* Background Image */}
-      <div className="absolute inset-0">
-        <Image
-          src="/login-bg.jpg"
-          alt="Login Background"
-          fill
-          className="object-cover"
-          priority
-        />
-        {/* Semi-transparent overlay */}
-        <div className="absolute inset-0 bg-[#98C8FB]/80" />
-      </div>
+      <div
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/oble.png)" }}
+      />
+
+      {/* White overlay */}
+      <div className="fixed inset-0 z-0 bg-white/50" />
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-md px-4">
+      <div className="relative z-10 w-full max-w-[300px] mx-auto px-2">
+
         {/* CURA Logo */}
-        <div className="flex justify-center mb-8">
-          <Image 
-            src="/cura-logo.png" 
-            alt="CURA Logo" 
-            width={280} 
-            height={95}
-            className="object-contain drop-shadow-lg"
+        <div className="flex justify-center mb-5">
+          <Image
+            src="/CURA_Full.png"
+            alt="CURA Logo"
+            width={200}
+            height={68}
+            className="object-contain drop-shadow-2xl"
             priority
           />
         </div>
 
-        {/* Login Form Card */}
-        <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-8 border border-white/20">
-          <form onSubmit={handleLogin} className="space-y-5">
+        {/* Login Card — matches homepage card style */}
+        <div className="bg-white/60 backdrop-blur-sm rounded shadow border-2 border-gray-300">
+
+          {/* Card Header — matches modal/sidebar headers */}
+          <div className="bg-secondary rounded-t px-4 py-3">
+            <p className="text-white/70 text-[10px] font-medium uppercase tracking-wide">Welcome back</p>
+            <h2 className="text-white font-bold text-sm uppercase tracking-wide">Sign In to CURA</h2>
+          </div>
+
+          <form onSubmit={handleLogin} className="p-4 space-y-2.5">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs">
                 {error}
               </div>
             )}
 
             {/* Email Address */}
-            <div>
-              <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
+            <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-200">
+              <label htmlFor="email" className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
                 Email Address
               </label>
               <Input
@@ -74,14 +78,14 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e5a9e] focus:border-transparent transition-all"
+                className="h-8 text-xs border-gray-300 focus:ring-secondary"
                 placeholder="Enter your email"
               />
             </div>
 
             {/* Password */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
+            <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-200">
+              <label htmlFor="password" className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
                 Password
               </label>
               <Input
@@ -89,20 +93,27 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e5a9e] focus:border-transparent transition-all"
+                className="h-8 text-xs border-gray-300 focus:ring-secondary"
                 placeholder="Enter your password"
               />
             </div>
 
             {/* Login Button */}
-            <Button
-              type="submit"
-              className="w-full bg-[#1e5a9e] hover:bg-[#174a82] text-white font-bold py-3 rounded-lg transition-all shadow-md hover:shadow-lg mt-6"
-            >
-              LOGIN
-            </Button>
+            <div className="pt-1">
+              <Button
+                type="submit"
+                className="w-full bg-secondary hover:bg-secondary/90 text-white text-[10px] font-bold uppercase tracking-wide shadow h-8"
+              >
+                LOGIN
+              </Button>
+            </div>
           </form>
         </div>
+
+        {/* Footer tagline */}
+        <p className="text-center text-[10px] text-gray-500 font-medium uppercase tracking-wide mt-4">
+          Centralized University Referral Application
+        </p>
 
       </div>
     </div>

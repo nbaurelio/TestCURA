@@ -49,32 +49,32 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
 
   return (
     <>
-      <header className="flex items-center justify-between px-3 sm:px-5 py-2 sm:py-3 bg-primary">
+      <header className="sticky top-0 z-50 flex items-center justify-between px-4 sm:px-6 py-2 bg-white border-b border-gray-200 shadow-sm">
         <Link href="/home" className="flex items-center">
           <Image 
-            src="/cura-logo-header.png" 
+            src="/CURA_Full.png" 
             alt="CURA Logo" 
-            width={40} 
-            height={15}
+            width={100} 
+            height={34}
             className="object-contain"
             priority
           />
         </Link>
 
-        <div className="flex items-center gap-2 sm:gap-4">
-          <div className="hidden sm:flex items-center bg-white rounded-full px-3 sm:px-4 py-1.5 w-[150px] sm:w-[200px] md:w-[300px] border border-gray-200">
+        <div className="flex items-center gap-3 sm:gap-5">
+          <div className="hidden sm:flex items-center bg-gray-50 rounded px-3 sm:px-4 py-2 w-[150px] sm:w-[200px] md:w-[320px] border border-gray-300 hover:border-accent transition-colors">
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="Search referrals..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="border-none outline-none flex-1 text-xs sm:text-sm bg-transparent text-gray-600"
+              className="border-none outline-none flex-1 text-xs sm:text-sm bg-transparent text-gray-700 font-medium placeholder:text-gray-400"
             />
-            <div className="flex items-center border-l border-gray-300 pl-2 pr-1">
+            <div className="flex items-center border-l border-gray-300 pl-2.5 pr-1">
               <select
                 value={searchCategory}
                 onChange={(e) => setSearchCategory(e.target.value)}
-                className="text-xs text-gray-600 bg-transparent border-none outline-none cursor-pointer font-medium appearance-none pr-4"
+                className="text-xs text-gray-600 bg-transparent border-none outline-none cursor-pointer font-semibold appearance-none pr-4 hover:text-secondary transition-colors"
                 style={{ backgroundImage: 'none' }}
               >
                 <option value="chart_number">Chart #</option>
@@ -85,43 +85,58 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
                 <option value="approved_by">Approved By</option>
               </select>
             </div>
-            <Search className="h-3 w-3 sm:h-4 sm:w-4 text-gray-400 ml-2" />
+            <Search className="h-4 w-4 text-gray-400 ml-2" />
           </div>
 
-          <Search className="sm:hidden h-5 w-5 text-secondary cursor-pointer" />
-          <FileText className="h-4 w-4 sm:h-5 sm:w-5 text-secondary cursor-pointer hover:text-secondary/80" />
-          <Bell className="h-4 w-4 sm:h-5 sm:w-5 text-secondary cursor-pointer hover:text-secondary/80" />
+          <button className="sm:hidden p-2 rounded hover:bg-gray-100 transition-colors">
+            <Search className="h-5 w-5 text-secondary" />
+          </button>
+          <button className="p-2 rounded hover:bg-gray-100 transition-colors">
+            <FileText className="h-5 w-5 text-secondary" />
+          </button>
+          <button className="p-2 rounded hover:bg-gray-100 transition-colors relative">
+            <Bell className="h-5 w-5 text-secondary" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+          </button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="cursor-pointer flex items-center gap-2">
-                <Avatar className="h-8 w-8">
+              <button className="cursor-pointer flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-100 transition-colors">
+                <Avatar className="h-9 w-9 border-2 border-gray-300 shadow-sm">
                   <AvatarImage src={profile?.avatar_url || "https://via.placeholder.com/32x32/d4a574/ffffff?text=U"} />
-                  <AvatarFallback className="bg-amber-200 text-amber-800 text-xs">
+                  <AvatarFallback className="bg-gradient-to-br from-accent to-secondary text-white text-xs font-bold">
                     {profile ? `${profile.first_name[0]}${profile.last_name[0]}`.toUpperCase() : "U"}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-secondary text-sm font-medium hidden sm:inline">{userFirstName}</span>
+                <span className="text-secondary text-sm font-bold hidden sm:inline">{userFirstName}</span>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48 bg-white border-gray-200">
-              <DropdownMenuItem
-                onClick={() => setIsEditProfileOpen(true)}
-                className="cursor-pointer font-medium text-secondary text-sm"
-              >
-                <User className="mr-2 h-4 w-4" />
-                EDIT MY PROFILE
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="cursor-pointer font-medium text-secondary text-sm">
-                <Link href="/activity-logs">
-                  <Activity className="mr-2 h-4 w-4" />
-                  ACTIVITY LOGS
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer font-medium text-red-600 text-sm">
-                <LogOut className="mr-2 h-4 w-4" />
-                LOGOUT
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-52 bg-white border-2 border-gray-200 shadow-xl rounded-xl p-0 overflow-hidden">
+              {/* Header banner */}
+              <div className="bg-secondary px-3 py-2.5">
+                <p className="text-white/70 text-[9px] uppercase tracking-wide">Signed in as</p>
+                <p className="text-white font-bold text-xs">{userFirstName}</p>
+              </div>
+              <div className="p-1">
+                <DropdownMenuItem
+                  onClick={() => setIsEditProfileOpen(true)}
+                  className="cursor-pointer rounded-lg px-3 py-2 text-[10px] font-bold text-secondary uppercase tracking-wide hover:bg-secondary hover:text-white transition-colors"
+                >
+                  <User className="mr-2 h-3.5 w-3.5" />
+                  Edit My Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild className="cursor-pointer rounded-lg px-3 py-2 text-[10px] font-bold text-secondary uppercase tracking-wide hover:bg-secondary hover:text-white transition-colors">
+                  <Link href="/activity-logs">
+                    <Activity className="mr-2 h-3.5 w-3.5" />
+                    Activity Logs
+                  </Link>
+                </DropdownMenuItem>
+                <div className="border-t border-gray-100 my-1" />
+                <DropdownMenuItem className="cursor-pointer rounded-lg px-3 py-2 text-[10px] font-bold text-red-500 uppercase tracking-wide hover:bg-red-50 hover:text-red-600 transition-colors">
+                  <LogOut className="mr-2 h-3.5 w-3.5" />
+                  Logout
+                </DropdownMenuItem>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -73,8 +73,19 @@ export default function ActivityLogsPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <Header />
+    <div className="min-h-screen flex flex-col relative">
+      {/* Background Image */}
+      <div 
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg-homepage.png)' }}
+      />
+      
+      {/* White Opaque Overlay */}
+      <div className="fixed inset-0 z-0 bg-white/60" />
+      
+      {/* Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <Header />
 
       <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-3 sm:p-5 max-w-[1400px] mx-auto w-full">
         {/* Left Sidebar - Hidden on mobile */}
@@ -89,17 +100,17 @@ export default function ActivityLogsPage() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 bg-white rounded-lg shadow-md p-3 sm:p-5">
+        <div className="flex-1 bg-white/60 backdrop-blur-sm rounded shadow border-2 border-gray-300 p-3 sm:p-5">
           <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline">
             ← Back to Home
           </Link>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 mb-4 sm:mb-6">
-            <h1 className="bg-secondary text-white text-xs sm:text-sm font-semibold py-2 px-4 rounded-md">
+            <h1 className="bg-secondary text-white text-xs sm:text-sm font-bold py-2.5 px-4 rounded shadow uppercase tracking-wide">
               ACTIVITY LOGS
             </h1>
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <span className="text-xs font-semibold text-secondary hidden sm:inline">SEARCH</span>
-              <div className="flex items-center bg-gray-100 rounded-md px-3 py-1 flex-1 sm:flex-none">
+              <span className="text-xs font-bold text-secondary hidden sm:inline uppercase tracking-wide">SEARCH</span>
+              <div className="flex items-center bg-muted rounded px-3 py-1 flex-1 sm:flex-none border-2 border-gray-300">
                 <Input
                   type="text"
                   placeholder="Search..."
@@ -117,19 +128,19 @@ export default function ActivityLogsPage() {
           {/* Desktop Table */}
           <div className="hidden sm:block overflow-x-auto">
             {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading activity logs...</div>
+              <div className="text-center py-8 text-muted-foreground">Loading activity logs...</div>
             ) : filteredLogs.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-muted-foreground">
                 {searchQuery ? "No logs found matching your search." : "No activity logs yet."}
               </div>
             ) : (
               <table className="w-full border-separate border-spacing-y-2">
                 <thead>
                   <tr>
-                    <th className="bg-primary text-secondary text-xs font-semibold py-3 px-3 sm:px-5 text-center rounded-l-lg w-[150px] sm:w-[200px]">
+                    <th className="bg-secondary text-white text-xs font-bold py-3 px-3 sm:px-5 text-center rounded-l w-[150px] sm:w-[200px] uppercase tracking-wide">
                       DATE PERFORMED
                     </th>
-                    <th className="bg-primary text-secondary text-xs font-semibold py-3 px-3 sm:px-5 text-center rounded-r-lg">
+                    <th className="bg-secondary text-white text-xs font-bold py-3 px-3 sm:px-5 text-center rounded-r uppercase tracking-wide">
                       DESCRIPTION
                     </th>
                   </tr>
@@ -139,12 +150,12 @@ export default function ActivityLogsPage() {
                     <tr 
                       key={log.id}
                       onClick={() => handleLogClick(log)}
-                      className="cursor-pointer hover:opacity-80 transition-opacity"
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
                     >
-                      <td className="bg-gray-50 py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-l-lg">
+                      <td className="bg-muted py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-l border-2 border-gray-300 font-medium">
                         {formatDateTime(log.created_at)}
                       </td>
-                      <td className="bg-gray-50 py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-r-lg">
+                      <td className="bg-muted py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-r border-2 border-gray-300 border-l-0 font-medium">
                         {log.description}
                       </td>
                     </tr>
@@ -157,9 +168,9 @@ export default function ActivityLogsPage() {
           {/* Mobile Cards */}
           <div className="sm:hidden space-y-3">
             {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading activity logs...</div>
+              <div className="text-center py-8 text-muted-foreground">Loading activity logs...</div>
             ) : filteredLogs.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-muted-foreground">
                 {searchQuery ? "No logs found matching your search." : "No activity logs yet."}
               </div>
             ) : (
@@ -167,10 +178,10 @@ export default function ActivityLogsPage() {
                 <div 
                   key={log.id} 
                   onClick={() => handleLogClick(log)}
-                  className="bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="bg-muted rounded p-3 cursor-pointer hover:bg-muted/70 transition-colors border-2 border-gray-300"
                 >
-                  <div className="text-[10px] text-gray-500 mb-1">{formatDateTime(log.created_at)}</div>
-                  <div className="text-xs text-gray-700">{log.description}</div>
+                  <div className="text-[10px] text-muted-foreground mb-1 font-semibold">{formatDateTime(log.created_at)}</div>
+                  <div className="text-xs text-gray-700 font-medium">{log.description}</div>
                 </div>
               ))
             )}
@@ -222,14 +233,15 @@ export default function ActivityLogsPage() {
         </div>
       </main>
 
-      <Footer />
-
       {/* Activity Log Details Modal */}
       <ActivityLogDetailsModal
         log={selectedLog}
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
       />
+
+        <Footer />
+      </div>
     </div>
   );
 }

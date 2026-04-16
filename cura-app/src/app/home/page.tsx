@@ -5,6 +5,7 @@ import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProfileCard } from "@/components/sidebar/ProfileCard";
+import { AcceptedReferralsButton } from "@/components/sidebar/AcceptedReferralsButton";
 import { SchedulePlanner } from "@/components/sidebar/SchedulePlanner";
 import { ReferralCard, FeaturedReferralCard } from "@/components/referrals/ReferralCard";
 import { CreateReferralModal } from "@/components/modals/CreateReferralModal";
@@ -89,8 +90,15 @@ export default function HomePage() {
   // Handle section change - reset dependent filters
   const handleSectionChange = (sectionId: string) => {
     setSelectedSection(sectionId);
-    setSelectedDiscipline("");
     setSelectedTreatment("");
+    
+    // For Prosthodontics, auto-select the single discipline
+    const section = filterTaxonomy.find(s => s.id === sectionId);
+    if (sectionId === "prostho" && section?.clinicalDisciplines.length === 1) {
+      setSelectedDiscipline(section.clinicalDisciplines[0].id);
+    } else {
+      setSelectedDiscipline("");
+    }
   };
 
   // Handle discipline change - reset dependent filters
@@ -280,16 +288,28 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <Header 
-        onProfileUpdate={() => setProfileRefreshTrigger(prev => prev + 1)}
-        onSearch={handleHeaderSearch}
+    <div className="min-h-screen flex flex-col relative">
+      {/* Background Image */}
+      <div 
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg-homepage.png)' }}
       />
+      
+      {/* White Opaque Overlay */}
+      <div className="fixed inset-0 z-0 bg-white/60" />
+      
+      {/* Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <Header 
+          onProfileUpdate={() => setProfileRefreshTrigger(prev => prev + 1)}
+          onSearch={handleHeaderSearch}
+        />
 
-      <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-4 lg:p-5 max-w-[1400px] mx-auto w-full">
+        <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-4 lg:p-5 max-w-[1400px] mx-auto w-full">
         {/* Left Sidebar - Hidden on mobile, shown on lg+ */}
         <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4">
           <ProfileCard refreshTrigger={profileRefreshTrigger} />
+          <AcceptedReferralsButton />
           <SchedulePlanner />
         </aside>
 
@@ -301,90 +321,35 @@ export default function HomePage() {
         {/* Center Content */}
         <section className="flex-1 order-2 lg:order-none">
           {/* Header with Make New Referral and Filter */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5">
             <Button
               onClick={() => setIsCreateModalOpen(true)}
-              className="bg-secondary hover:bg-secondary/90 text-white font-semibold px-4 sm:px-6 text-sm sm:text-base w-full sm:w-auto"
+              className="bg-secondary hover:bg-secondary/90 text-white font-bold px-6 sm:px-8 text-xs sm:text-sm w-full sm:w-auto uppercase tracking-wide shadow"
             >
               MAKE NEW REFERRAL
             </Button>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs sm:text-sm text-gray-600">Filter by</span>
+              <span className="text-xs sm:text-sm text-muted-foreground font-semibold">Filter by</span>
               <div className="relative">
-                <select className="appearance-none bg-white border border-gray-300 rounded px-3 sm:px-4 py-2 pr-8 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                <select className="appearance-none bg-white border-2 border-gray-300 rounded px-3 sm:px-4 py-2 pr-8 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-accent">
                   <option>Date</option>
                   <option>Status</option>
                   <option>Department</option>
                 </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               </div>
             </div>
           </div>
 
-          {/* Pinned/Featured Referrals - Accepted Referrals (Approved and Pending) */}
-          {referrals.filter(r => r.is_featured && (r.status === 'pending' || r.status === 'approved')).length > 0 && (
-            <div className="mb-6">
-              <div className="bg-gradient-to-r from-primary/20 to-secondary/20 rounded-lg p-3 sm:p-4 border-2 border-primary/30">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="bg-secondary text-white text-xs font-bold px-3 py-1 rounded">
-                    PINNED
-                  </div>
-                  <span className="text-xs sm:text-sm font-semibold text-secondary">Accepted Referrals</span>
-                </div>
-                <div className="space-y-3">
-                  {referrals
-                    .filter(r => r.is_featured && (r.status === 'pending' || r.status === 'approved'))
-                    .sort((a, b) => {
-                      // Sort approved referrals first, then pending
-                      if (a.status === 'approved' && b.status === 'pending') return -1;
-                      if (a.status === 'pending' && b.status === 'approved') return 1;
-                      return 0;
-                    })
-                    .map((referral) => {
-                      const age = referral.age || 0;
-                      const title = `Referring ${age} yr. old patient for ${referral.clinical_section_destination}`;
-                      
-                      return (
-                        <ReferralCard
-                          key={referral.id}
-                          id={referral.id}
-                          title={title}
-                          medicalAlert={referral.medical_alert || undefined}
-                          clinicalSectionOrigin={referral.clinical_section_origin}
-                          clinicalSectionDestination={referral.clinical_section_destination}
-                          clinicalDisciplineOrigin={referral.clinical_discipline_origin || undefined}
-                          clinicalDisciplineDestination={referral.clinical_discipline_destination || undefined}
-                          treatmentServiceOrigin={referral.treatment_service_origin || undefined}
-                          treatmentServiceDestination={referral.treatment_service_destination || undefined}
-                          notesAndIndications={referral.notes_and_special_indications || undefined}
-                          chartNumber={referral.chart_number}
-                          acceptedBy={referral.accepted_by}
-                          status={referral.status}
-                          showAccept={false}
-                          createdAt={referral.created_at}
-                          treatment={referral.treatment || undefined}
-                          medicalHistory={referral.medical_history || undefined}
-                          isFeatured={referral.is_featured}
-                          onUpdate={(id, updates) => handleUpdateReferral(id, updates)}
-                          onAccept={() => handleAcceptReferral(referral.id)}
-                          onDelete={handleDeleteReferral}
-                        />
-                      );
-                    })}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Referrals List */}
-          <div className="space-y-4">
+          <div className="space-y-3">
             {loading ? (
-              <div className="bg-white rounded-lg shadow-sm p-8 text-center text-gray-500">
+              <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
                 Loading referrals...
               </div>
             ) : filteredReferrals.length === 0 ? (
-              <div className="bg-white rounded-lg shadow-sm p-8 text-center text-gray-500">
+              <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
                 No referrals yet. Create your first referral!
               </div>
             ) : (
@@ -398,7 +363,8 @@ export default function HomePage() {
                 })
                 .map((referral) => {
                   const age = referral.age || 0;
-                  const title = `Referring ${age} yr. old patient for ${referral.clinical_section_destination}`;
+                  const specialCase = referral.special_case ? ` (${referral.special_case})` : '';
+                  const title = `Referring ${age} yr. old patient for ${referral.treatment_service_destination}${specialCase}`;
                   
                   return (
                     <ReferralCard
@@ -439,17 +405,17 @@ export default function HomePage() {
         {/* Right Sidebar */}
         <aside className="w-full lg:w-[220px] flex-shrink-0 space-y-4 order-1 lg:order-none">
           {/* Advanced Filter Search */}
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="bg-secondary text-white text-xs font-semibold py-2 px-4 rounded-t-lg text-center">
-              ADVANCED FILTER SEARCH (CLINICAL DESTINATION)
+          <div className="bg-white/60 backdrop-blur-sm rounded shadow border-2 border-gray-300">
+            <div className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center uppercase tracking-wide">
+              ADVANCED FILTER SEARCH
             </div>
-            <div className="p-3 space-y-3">
+            <div className="p-4 space-y-3">
               {/* Clinical Section Dropdown */}
               <div className="relative">
                 <select 
                   value={selectedSection}
                   onChange={(e) => handleSectionChange(e.target.value)}
-                  className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full bg-white border-2 border-gray-300 rounded px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent"
                 >
                   <option value="">By Clinical Section</option>
                   {filterTaxonomy.map((section) => (
@@ -460,37 +426,39 @@ export default function HomePage() {
                 </select>
               </div>
 
-              {/* Clinical Discipline Dropdown - Only enabled if section is selected */}
-              <div className="relative">
-                <select 
-                  value={selectedDiscipline}
-                  onChange={(e) => handleDisciplineChange(e.target.value)}
-                  disabled={!selectedSection}
-                  className={`w-full border rounded px-3 py-2 text-xs focus:outline-none ${
-                    selectedSection 
-                      ? 'bg-white border-gray-300 focus:ring-2 focus:ring-primary text-gray-900' 
-                      : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  <option value="">By Clinical Discipline</option>
-                  {getAvailableDisciplines().map((discipline) => (
-                    <option key={discipline.id} value={discipline.id}>
-                      {discipline.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Clinical Discipline Dropdown - Only enabled if section is selected, hidden for Prosthodontics */}
+              {selectedSection !== "prostho" && (
+                <div className="relative">
+                  <select 
+                    value={selectedDiscipline}
+                    onChange={(e) => handleDisciplineChange(e.target.value)}
+                    disabled={!selectedSection}
+                    className={`w-full border-2 rounded px-3 py-2 text-xs font-semibold focus:outline-none ${
+                      selectedSection 
+                        ? 'bg-white border-gray-300 focus:ring-2 focus:ring-accent text-gray-900' 
+                        : 'bg-muted border-gray-300 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <option value="">By Clinical Discipline</option>
+                    {getAvailableDisciplines().map((discipline) => (
+                      <option key={discipline.id} value={discipline.id}>
+                        {discipline.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-              {/* Treatment Service Dropdown - Only enabled if both section and discipline are selected */}
+              {/* Treatment Service Dropdown - Only enabled if both section and discipline are selected (or Prosthodontics) */}
               <div className="relative">
                 <select 
                   value={selectedTreatment}
                   onChange={(e) => handleTreatmentChange(e.target.value)}
-                  disabled={!selectedSection || !selectedDiscipline}
-                  className={`w-full border rounded px-3 py-2 text-xs focus:outline-none ${
-                    selectedSection && selectedDiscipline
-                      ? 'bg-white border-gray-300 focus:ring-2 focus:ring-primary text-gray-900' 
-                      : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                  disabled={!selectedSection || (!selectedDiscipline && selectedSection !== "prostho")}
+                  className={`w-full border-2 rounded px-3 py-2 text-xs font-semibold focus:outline-none ${
+                    selectedSection && (selectedDiscipline || selectedSection === "prostho")
+                      ? 'bg-white border-gray-300 focus:ring-2 focus:ring-accent text-gray-900' 
+                      : 'bg-muted border-gray-300 text-gray-400 cursor-not-allowed'
                   }`}
                 >
                   <option value="">By Treatment Service</option>
@@ -505,7 +473,7 @@ export default function HomePage() {
               <div className="flex gap-2">
                 <Button 
                   onClick={handleSearch}
-                  className="flex-1 bg-secondary hover:bg-secondary/90 text-white text-xs font-semibold"
+                  className="flex-1 bg-secondary hover:bg-secondary/90 text-white text-xs font-bold uppercase tracking-wide shadow"
                 >
                   SEARCH
                 </Button>
@@ -513,7 +481,7 @@ export default function HomePage() {
                   <Button 
                     onClick={handleResetFilters}
                     variant="outline"
-                    className="text-xs font-semibold"
+                    className="text-xs font-bold uppercase tracking-wide"
                   >
                     RESET
                   </Button>
@@ -523,14 +491,14 @@ export default function HomePage() {
           </div>
 
           {/* Featured Referrals */}
-          <div className="bg-[#c5ddf5] rounded-2xl overflow-hidden">
-            <div className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center">
+          <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow overflow-hidden">
+            <div className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center uppercase tracking-wide">
               FEATURED REFERRALS
             </div>
             <div className="p-4">
               {/* Carousel Container */}
               {featuredReferrals.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 text-sm">
+                <div className="text-center py-8 text-muted-foreground text-sm">
                   No non-accepted referrals available
                 </div>
               ) : (
@@ -539,7 +507,7 @@ export default function HomePage() {
                   {featuredReferrals.length > 1 && (
                     <button
                       onClick={prevSlide}
-                      className="absolute -left-2 z-10 text-gray-400 hover:text-secondary transition-colors"
+                      className="absolute -left-2 z-10 text-muted-foreground hover:text-secondary transition-colors"
                     >
                       <ChevronLeft className="h-5 w-5" />
                     </button>
@@ -550,7 +518,7 @@ export default function HomePage() {
                     {featuredReferrals[currentSlide] && (
                       <FeaturedReferralCard
                         id={featuredReferrals[currentSlide].id}
-                        title={`Referring ${featuredReferrals[currentSlide].age || 0} yr. old patient for ${featuredReferrals[currentSlide].clinical_section_destination}`}
+                        title={`Referring ${featuredReferrals[currentSlide].age || 0} yr. old patient for ${featuredReferrals[currentSlide].treatment_service_destination}${featuredReferrals[currentSlide].special_case ? ` (${featuredReferrals[currentSlide].special_case})` : ''}`}
                         medicalAlert={featuredReferrals[currentSlide].medical_alert || undefined}
                         clinicalSectionOrigin={featuredReferrals[currentSlide].clinical_section_origin}
                         clinicalSectionDestination={featuredReferrals[currentSlide].clinical_section_destination}
@@ -577,7 +545,7 @@ export default function HomePage() {
                   {featuredReferrals.length > 1 && (
                     <button
                       onClick={nextSlide}
-                      className="absolute -right-2 z-10 text-gray-400 hover:text-secondary transition-colors"
+                      className="absolute -right-2 z-10 text-muted-foreground hover:text-secondary transition-colors"
                     >
                       <ChevronRight className="h-5 w-5" />
                     </button>
@@ -591,10 +559,10 @@ export default function HomePage() {
                   <button
                     key={idx}
                     onClick={() => setCurrentSlide(idx)}
-                    className={`w-3 h-3 rounded-full transition-colors border-2 ${
+                    className={`w-2.5 h-2.5 rounded-full transition-colors border-2 ${
                       idx === currentSlide 
                         ? "bg-secondary border-secondary" 
-                        : "bg-white border-white shadow-sm"
+                        : "bg-gray-300 border-gray-300"
                     }`}
                   />
                 ))}
@@ -704,6 +672,7 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

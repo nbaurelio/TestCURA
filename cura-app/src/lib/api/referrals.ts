@@ -11,6 +11,7 @@ export interface ReferralFormData {
   clinical_section_destination: string;
   clinical_discipline_destination?: string;
   treatment_service_destination?: string;
+  special_case?: string;
   medical_history?: string;
   tentative_appointment_schedule?: string;
   notes_and_special_indications?: string;
@@ -125,6 +126,8 @@ export interface Referral {
   clinical_discipline_destination?: string | null;
   treatment_service_origin?: string | null;
   treatment_service_destination?: string | null;
+  special_case?: string | null;
+  tentative_appointment_schedule?: string | null;
   medical_history: string | null;
   notes_and_special_indications: string | null;
   status: string;

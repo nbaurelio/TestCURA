@@ -314,8 +314,19 @@ export default function SchedulePage() {
   const weekDates = getWeekDates();
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <Header />
+    <div className="min-h-screen flex flex-col relative">
+      {/* Background Image */}
+      <div 
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg-homepage.png)' }}
+      />
+      
+      {/* White Opaque Overlay */}
+      <div className="fixed inset-0 z-0 bg-white/60" />
+      
+      {/* Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <Header />
 
       <main className="flex-1 p-4 sm:p-6 max-w-[1200px] mx-auto w-full">
         <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline">
@@ -323,31 +334,31 @@ export default function SchedulePage() {
         </Link>
 
         {/* Header Bar */}
-        <div className="bg-secondary rounded-xl p-3 flex items-center justify-between mb-6">
-          <h1 className="text-white font-semibold text-sm sm:text-base">{userFirstName}&apos;s Schedule Planner</h1>
+        <div className="bg-secondary rounded p-4 flex items-center justify-between mb-6 shadow">
+          <h1 className="text-white font-bold text-sm sm:text-base uppercase tracking-wide">{userFirstName}&apos;s Schedule Planner</h1>
           <button 
             onClick={() => setIsModalOpen(true)} 
-            className="text-white hover:text-white/80 text-xl font-bold"
+            className="text-white hover:text-white/80 text-2xl font-bold w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
           >
             +
           </button>
         </div>
 
         {/* Calendar Container */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-white/60 backdrop-blur-sm rounded shadow border-2 border-gray-300 overflow-hidden">
           {/* Month Navigation */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 py-4 px-6 border-b border-gray-200">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 py-4 px-6 border-b-2 border-gray-300 bg-muted">
             <div className="flex items-center gap-4">
               <button 
                 onClick={() => navigateWeek('prev')}
-                className="w-8 h-8 rounded-full border-2 border-primary text-primary flex items-center justify-center hover:bg-primary/10"
+                className="w-8 h-8 rounded border-2 border-accent text-accent flex items-center justify-center hover:bg-accent hover:text-white transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="font-semibold text-secondary text-lg min-w-[180px] text-center">{currentMonth}</span>
+              <span className="font-bold text-secondary text-lg min-w-[180px] text-center uppercase tracking-wide">{currentMonth}</span>
               <button 
                 onClick={() => navigateWeek('next')}
-                className="w-8 h-8 rounded-full border-2 border-primary text-primary flex items-center justify-center hover:bg-primary/10"
+                className="w-8 h-8 rounded border-2 border-accent text-accent flex items-center justify-center hover:bg-accent hover:text-white transition-colors"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -358,7 +369,7 @@ export default function SchedulePage() {
               <select
                 value={selectedYear}
                 onChange={(e) => handleYearChange(Number(e.target.value))}
-                className="px-3 py-1.5 text-sm border-2 border-primary rounded-lg bg-white text-secondary font-semibold hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="px-3 py-1.5 text-sm border-2 border-gray-300 rounded bg-white text-secondary font-bold hover:bg-muted focus:outline-none focus:ring-2 focus:ring-accent uppercase tracking-wide"
               >
                 {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map(year => (
                   <option key={year} value={year}>{year}</option>
@@ -368,7 +379,7 @@ export default function SchedulePage() {
               {/* Today Button */}
               <button
                 onClick={goToToday}
-                className="px-4 py-1.5 text-sm bg-primary text-secondary font-semibold rounded-lg hover:bg-primary/90 transition-colors"
+                className="px-4 py-1.5 text-sm bg-secondary text-white font-bold rounded hover:bg-secondary/90 transition-colors shadow uppercase tracking-wide"
               >
                 Today
               </button>
@@ -376,18 +387,18 @@ export default function SchedulePage() {
           </div>
 
           {/* Days Header */}
-          <div className="grid grid-cols-8 gap-2 px-4 py-3 bg-gray-50">
+          <div className="grid grid-cols-8 gap-2 px-4 py-3 bg-muted border-b border-gray-300">
             <div className="w-5 pr-1"></div>
             {weekDates.map((date, idx) => {
               const isToday = date.toDateString() === new Date().toDateString();
               return (
                 <div key={idx} className="text-center">
-                  <div className={`rounded-lg py-2 px-2 ${
+                  <div className={`rounded py-2 px-2 ${
                     isToday 
-                      ? 'bg-secondary border-2 border-secondary shadow-md' 
-                      : 'bg-primary'
+                      ? 'bg-secondary border-2 border-secondary shadow' 
+                      : 'bg-white border-2 border-gray-300'
                   }`}>
-                    <div className={`text-[10px] font-semibold ${
+                    <div className={`text-[10px] font-bold uppercase tracking-wide ${
                       isToday ? 'text-white' : 'text-secondary'
                     }`}>{days[idx]}</div>
                     <div className={`text-sm font-bold ${
@@ -402,7 +413,7 @@ export default function SchedulePage() {
           {/* Schedule Grid */}
           <div className="max-h-[500px] overflow-y-auto px-4 pb-4 pt-2">
             {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading events...</div>
+              <div className="text-center py-8 text-muted-foreground">Loading events...</div>
             ) : (
               times.map((time, timeIdx) => (
                 <div key={time} className="grid grid-cols-8 gap-2" style={{ marginTop: timeIdx === 0 ? 0 : '0.5rem' }}>
@@ -424,7 +435,7 @@ export default function SchedulePage() {
                         {eventStartingHere ? (
                           <div 
                             onClick={() => handleEventClick(eventStartingHere)}
-                            className="bg-secondary text-white rounded-lg text-[10px] font-semibold overflow-hidden hover:bg-secondary/90 cursor-pointer transition-colors flex items-center justify-center p-2"
+                            className="bg-secondary text-white rounded text-[10px] font-bold overflow-hidden hover:bg-secondary/90 cursor-pointer transition-colors flex items-center justify-center p-2 shadow"
                             style={{
                               height: `calc(${getEventDurationInSlots(eventStartingHere) * 2}rem + ${(getEventDurationInSlots(eventStartingHere) - 1) * 0.5}rem)`,
                               position: 'absolute',
@@ -763,6 +774,9 @@ export default function SchedulePage() {
           </div>
         </div>
       )}
+
+        <Footer />
+      </div>
     </div>
   );
 }
