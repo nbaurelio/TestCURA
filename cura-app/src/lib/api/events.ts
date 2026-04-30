@@ -1,4 +1,23 @@
 import { supabase } from "@/lib/supabase";
+import { getCurrentUserId } from "@/lib/api/profiles";
+
+// Simple cache for events - persistent across page navigations
+interface EventsCache {
+  data: any[];
+  timestamp: number;
+  userId: string;
+}
+let eventsCache: EventsCache | null = null;
+let hasInitiallyLoaded = false;
+
+export function clearEventsCache() {
+  eventsCache = null;
+  hasInitiallyLoaded = false;
+}
+
+export function hasEventsCache(): boolean {
+  return hasInitiallyLoaded && eventsCache !== null;
+}
 
 export interface EventFormData {
   title: string;
@@ -12,7 +31,7 @@ export interface EventFormData {
 }
 
 export async function createEvent(data: EventFormData) {
-  const mockUserId = "00000000-0000-0000-0000-000000000000";
+  const mockUserId = getCurrentUserId();
 
   const eventsTable = supabase.from("events") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
@@ -37,6 +56,9 @@ export async function createEvent(data: EventFormData) {
     throw error;
   }
 
+  // Clear cache after mutation
+  clearEventsCache();
+
   // Log the activity
   await activityLogsTable.insert({
     user_id: mockUserId,
@@ -55,8 +77,13 @@ export async function createEvent(data: EventFormData) {
   return event;
 }
 
-export async function getEvents() {
-  const mockUserId = "00000000-0000-0000-0000-000000000000";
+export async function getEvents(useCache = true) {
+  const mockUserId = getCurrentUserId();
+
+  // Return cached data immediately if available (persistent across navigations)
+  if (useCache && hasInitiallyLoaded && eventsCache && eventsCache.userId === mockUserId) {
+    return eventsCache.data;
+  }
 
   const { data, error } = await supabase
     .from("events")
@@ -68,11 +95,17 @@ export async function getEvents() {
     throw error;
   }
 
+  // Update cache and mark as loaded
+  if (useCache) {
+    eventsCache = { data: data || [], timestamp: Date.now(), userId: mockUserId };
+    hasInitiallyLoaded = true;
+  }
+
   return data;
 }
 
 export async function updateEvent(id: string, updates: Partial<EventFormData>) {
-  const mockUserId = "00000000-0000-0000-0000-000000000000";
+  const mockUserId = getCurrentUserId();
 
   const eventsTable = supabase.from("events") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
@@ -86,6 +119,9 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
   if (error) {
     throw error;
   }
+
+  // Clear cache after mutation
+  clearEventsCache();
 
   // Log the activity
   await activityLogsTable.insert({
@@ -106,7 +142,7 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
 }
 
 export async function deleteEvent(id: string) {
-  const mockUserId = "00000000-0000-0000-0000-000000000000";
+  const mockUserId = getCurrentUserId();
 
   const eventsTable = supabase.from("events") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
@@ -144,6 +180,9 @@ export async function deleteEvent(id: string) {
       end_time: event.end_time
     })
   } as any);
+
+  // Clear cache after mutation
+  clearEventsCache();
 
   return true;
 }

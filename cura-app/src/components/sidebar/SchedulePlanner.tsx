@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { getEvents } from "@/lib/api/events";
-import { getProfile } from "@/lib/api/profiles";
+import { getEvents, hasEventsCache } from "@/lib/api/events";
+import { getMockUserProfile, hasProfileCache, getMockUserProfileSync } from "@/lib/api/profiles";
 
 interface Event {
   id: string;
@@ -25,45 +25,65 @@ export function SchedulePlanner({
 }: SchedulePlannerProps) {
   const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Only show loading on initial load if no cache exists
+  const [loading, setLoading] = useState(!hasEventsCache());
   const [userFirstName, setUserFirstName] = useState<string>(userName || "[USER]");
 
-  useEffect(() => {
-    loadEvents();
-    loadUserName();
-  }, [userName]);
-
-  const loadUserName = async () => {
+  const loadUserName = useCallback(async () => {
     if (userName) {
       setUserFirstName(userName);
       return;
     }
     try {
-      const mockUserId = "00000000-0000-0000-0000-000000000000";
-      const profile = await getProfile(mockUserId);
+      // Get from cache if available, otherwise fetch
+      const profile = hasProfileCache() ? getMockUserProfileSync() : await getMockUserProfile();
       if (profile?.first_name) {
         setUserFirstName(profile.first_name);
       }
     } catch (error) {
       console.error("Error loading user name:", error);
     }
-  };
+  }, [userName]);
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     try {
-      setLoading(true);
       const data = await getEvents();
-      // Get top 3 most recent events
-      const recentEvents = (data || []).slice(0, 3);
-      setEvents(recentEvents);
+      
+      // Get current week's start (Sunday) and end (Saturday)
+      const now = new Date();
+      const currentDay = now.getDay(); // 0 = Sunday, 6 = Saturday
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - currentDay);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      
+      // Filter events for current week and get first 3
+      const currentWeekEvents = (data || [])
+        .filter(event => {
+          const eventDate = new Date(event.start_time);
+          return eventDate >= weekStart && eventDate <= weekEnd;
+        })
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+        .slice(0, 3);
+      
+      setEvents(currentWeekEvents);
     } catch (error) {
       console.error("Error loading events:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const formatTime = (startTime: string, endTime: string) => {
+  useEffect(() => {
+    loadEvents();
+    loadUserName();
+  }, [loadEvents, loadUserName]);
+
+  // Memoize format functions to prevent recreation
+  const formatTime = useCallback((startTime: string, endTime: string) => {
     const start = new Date(startTime);
     const end = new Date(endTime);
     
@@ -78,15 +98,15 @@ export function SchedulePlanner({
     };
     
     return `${formatTimeStr(start)} - ${formatTimeStr(end)}`;
-  };
+  }, []);
 
-  const formatDate = (dateString: string) => {
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     const days = ['SUN', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT'];
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
     return `${days[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}`;
-  };
+  }, []);
 
   return (
     <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow overflow-hidden">

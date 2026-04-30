@@ -43,6 +43,12 @@ CREATE TABLE referrals (
   notes_and_special_indications TEXT,
   status TEXT DEFAULT 'pending',
   accepted_by TEXT DEFAULT 'None',
+  edit_request_reason TEXT,
+  edit_request_status TEXT,
+  last_edited_by TEXT,
+  last_edited_at TIMESTAMPTZ,
+  referral_status TEXT DEFAULT 'ongoing',
+  referral_status_changed_at TIMESTAMPTZ,
   is_featured BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -78,14 +84,47 @@ ALTER TABLE referrals DISABLE ROW LEVEL SECURITY;
 ALTER TABLE events DISABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;
 
--- Create a test user profile
-INSERT INTO profiles (id, email, first_name, last_name, role)
+-- Create test user profiles
+INSERT INTO profiles (id, email, first_name, last_name, year_level, clinical_department, role)
 VALUES (
   '00000000-0000-0000-0000-000000000000',
   'test@example.com',
   'Test',
   'User',
+  '5th yr',
+  'Prostho',
   'user'
+);
+
+INSERT INTO profiles (id, email, first_name, last_name, year_level, clinical_department, role)
+VALUES (
+  '11111111-1111-1111-1111-111111111111',
+  'juan@example.com',
+  'Juan',
+  'Dela Cruz',
+  '4th yr',
+  'Ortho',
+  'user'
+);
+
+-- Sample referral created by second user (for testing multi-user dropdown visibility)
+INSERT INTO referrals (user_id, chart_number, treatment, age, medical_alert, clinical_section_origin, clinical_discipline_origin, treatment_service_origin, clinical_section_destination, clinical_discipline_destination, treatment_service_destination, notes_and_special_indications, status, accepted_by, is_featured)
+VALUES (
+  '11111111-1111-1111-1111-111111111111',
+  '2026-00001',
+  'Orthodontic Braces',
+  25,
+  'None',
+  'Ortho',
+  'Orthodontics',
+  'Orthodontic Braces',
+  'Prostho',
+  'Prosthodontics',
+  'Removable Partial Dentures',
+  'Patient needs prosthetic evaluation after ortho treatment',
+  'pending',
+  'None',
+  false
 );
 
 -- Indexes for better performance

@@ -1,19 +1,23 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProfileCard } from "@/components/sidebar/ProfileCard";
 import { AcceptedReferralsButton } from "@/components/sidebar/AcceptedReferralsButton";
+import { EditRequestsButton } from "@/components/sidebar/EditRequestsButton";
 import { SchedulePlanner } from "@/components/sidebar/SchedulePlanner";
-import { ReferralCard, FeaturedReferralCard } from "@/components/referrals/ReferralCard";
+import { ReferralCard, MemoizedReferralCard, MemoizedFeaturedReferralCard } from "@/components/referrals/ReferralCard";
 import { CreateReferralModal } from "@/components/modals/CreateReferralModal";
 import { NewPatientReferralModal } from "@/components/modals/NewPatientReferralModal";
 import { ExistingPatientReferralModal } from "@/components/modals/ExistingPatientReferralModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { getReferrals, deleteReferral, acceptReferral, updateReferral, Referral } from "@/lib/api/referrals";
+import { getReferrals, deleteReferral, acceptReferral, updateReferral, fixStaleAcceptedBy, Referral } from "@/lib/api/referrals";
+import { getMockUserProfile, getCurrentUserId, getProfile } from "@/lib/api/profiles";
+import { supabase } from "@/lib/supabase";
+import { RouteGuard } from "@/components/auth/RouteGuard";
 import { filterTaxonomy, ClinicalSection, ClinicalDiscipline, TreatmentService } from "@/lib/data/filterTaxonomy";
 
 
@@ -30,13 +34,74 @@ export default function HomePage() {
   const [featuredReferrals, setFeaturedReferrals] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0);
+  const [currentUserName, setCurrentUserName] = useState<string>("Unknown User");
+  const [acceptedReferralIds, setAcceptedReferralIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    getProfile(getCurrentUserId()).then((p) => {
+      if (p) {
+        const fullName = `${p.first_name} ${p.last_name}`.trim();
+        setCurrentUserName(fullName);
+        fixStaleAcceptedBy(fullName).catch(() => {});
+      }
+    }).catch(() => {});
+
+    // Fetch referral IDs accepted by the current user from activity logs
+    const fetchAcceptedIds = async () => {
+      const userId = getCurrentUserId();
+      const { data } = await (supabase.from("activity_logs") as any)
+        .select("metadata")
+        .eq("action", "ACCEPT_REFERRAL")
+        .eq("user_id", userId);
+      if (data) {
+        const ids = new Set<string>(
+          (data as any[]).map((log: any) => {
+            try {
+              const parsed = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
+              return parsed?.referral_id;
+            } catch { return null; }
+          }).filter(Boolean)
+        );
+        setAcceptedReferralIds(ids);
+      }
+    };
+    fetchAcceptedIds();
+  }, []);
   
   // Advanced Filter State
   const [selectedSection, setSelectedSection] = useState<string>("");
   const [selectedDiscipline, setSelectedDiscipline] = useState<string>("");
   const [selectedTreatment, setSelectedTreatment] = useState<string>("");
+  const [specialCaseFilter, setSpecialCaseFilter] = useState<string>("");
+  const [isSectionOpen, setIsSectionOpen] = useState(false);
+  const [isDisciplineOpen, setIsDisciplineOpen] = useState(false);
+  const [isTreatmentOpen, setIsTreatmentOpen] = useState(false);
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const disciplineRef = useRef<HTMLDivElement>(null);
+  const treatmentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sectionRef.current && !sectionRef.current.contains(e.target as Node)) setIsSectionOpen(false);
+      if (disciplineRef.current && !disciplineRef.current.contains(e.target as Node)) setIsDisciplineOpen(false);
+      if (treatmentRef.current && !treatmentRef.current.contains(e.target as Node)) setIsTreatmentOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
   const [filteredReferrals, setFilteredReferrals] = useState<Referral[]>([]);
   const [isAdvancedFilterActive, setIsAdvancedFilterActive] = useState(false);
+
+  // Counts for sidebar badges
+  const currentUserId = getCurrentUserId();
+  const acceptedCount = useMemo(() => 
+    referrals.filter(r => r.is_featured && r.accepted_by && r.accepted_by !== "None" && acceptedReferralIds.has(r.id) && (r.status === "pending" || r.status === "approved")).length,
+    [referrals, acceptedReferralIds]
+  );
+  const editRequestCount = useMemo(() => 
+    referrals.filter(r => r.user_id === currentUserId && r.edit_request_status && (r.edit_request_status === "approved" || r.edit_request_status === "declined")).length,
+    [referrals, currentUserId]
+  );
 
   useEffect(() => {
     loadReferrals();
@@ -53,7 +118,7 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [featuredReferrals.length]);
 
-  const loadReferrals = async () => {
+  const loadReferrals = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getReferrals();
@@ -62,15 +127,19 @@ export default function HomePage() {
       
       // Get random non-accepted referrals for featured carousel
       const nonAccepted = (data || []).filter(r => r.accepted_by === 'None');
-      // Shuffle and take up to 3 random referrals
-      const shuffled = [...nonAccepted].sort(() => Math.random() - 0.5);
+      // Shuffle and take up to 3 random referrals using Fisher-Yates for better performance
+      const shuffled = nonAccepted.length > 0 ? [...nonAccepted] : [];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
       setFeaturedReferrals(shuffled.slice(0, 3));
     } catch (error) {
       console.error("Error loading referrals:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Get available disciplines based on selected section
   const getAvailableDisciplines = (): ClinicalDiscipline[] => {
@@ -159,6 +228,11 @@ export default function HomePage() {
       }
     }
 
+    if (specialCaseFilter.trim()) {
+      const q = specialCaseFilter.toLowerCase().trim();
+      filtered = filtered.filter(r => r.special_case?.toLowerCase().includes(q));
+    }
+
     console.log('Final filtered referrals:', filtered.length);
     setFilteredReferrals(filtered);
   };
@@ -168,6 +242,7 @@ export default function HomePage() {
     setSelectedSection("");
     setSelectedDiscipline("");
     setSelectedTreatment("");
+    setSpecialCaseFilter("");
     setIsAdvancedFilterActive(false);
     setFilteredReferrals(referrals);
   };
@@ -216,10 +291,10 @@ export default function HomePage() {
     loadReferrals();
   };
 
-  const handleDeleteReferral = (id: string) => {
+  const handleDeleteReferral = useCallback((id: string) => {
     setReferralToDelete(id);
     setIsDeleteConfirmOpen(true);
-  };
+  }, []);
 
   const confirmDeleteReferral = async () => {
     if (!referralToDelete) return;
@@ -235,32 +310,45 @@ export default function HomePage() {
     }
   };
 
-  const handleUpdateReferral = async (id: string, updates: Partial<Referral>) => {
+  const handleUpdateReferral = useCallback(async (id: string, updates: Partial<Referral>) => {
     // Optimistic update — instantly reflect changes in UI
     setReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     setFilteredReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     setFeaturedReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     try {
       await updateReferral(id, updates as any);
-      loadReferrals();
     } catch (error: any) {
       console.error("Error updating referral (full):", JSON.stringify(error, null, 2));
-      loadReferrals();
       const msg = error?.message || error?.error_description || JSON.stringify(error);
       alert(`Failed to update referral: ${msg}`);
     }
-  };
+  }, []);
 
-  const handleAcceptReferral = (id: string) => {
+  const handleAcceptReferral = useCallback((id: string) => {
     setReferralToAccept(id);
     setIsAcceptConfirmOpen(true);
-  };
+  }, []);
+
+  const handleEditRequestSubmitted = useCallback(() => {
+    loadReferrals();
+  }, [loadReferrals]);
+
+  // Memoize the filtered non-featured referrals to prevent recomputation
+  const visibleReferrals = useMemo(() => {
+    return filteredReferrals.filter(referral => {
+      // Exclude pinned referrals (both pending and approved)
+      if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
+        return false;
+      }
+      return true;
+    });
+  }, [filteredReferrals]);
 
   const confirmAcceptReferral = async () => {
     if (!referralToAccept) return;
 
     try {
-      await acceptReferral(referralToAccept, "Dr. Smith");
+      await acceptReferral(referralToAccept, currentUserName);
       setIsAcceptConfirmOpen(false);
       setReferralToAccept(null);
       loadReferrals();
@@ -279,6 +367,7 @@ export default function HomePage() {
   };
 
   return (
+    <RouteGuard allowedRoles={["clinician"]}>
     <div className="min-h-screen flex flex-col relative">
       {/* Background Image */}
       <div 
@@ -300,13 +389,22 @@ export default function HomePage() {
         {/* Left Sidebar - Hidden on mobile, shown on lg+ */}
         <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4">
           <ProfileCard refreshTrigger={profileRefreshTrigger} />
-          <AcceptedReferralsButton />
+          <AcceptedReferralsButton count={acceptedCount} />
+          <EditRequestsButton count={editRequestCount} />
           <SchedulePlanner />
         </aside>
 
-        {/* Mobile Profile Card - Only shown on mobile */}
-        <div className="lg:hidden">
+        {/* Mobile Profile Card & Buttons - Only shown on mobile */}
+        <div className="lg:hidden space-y-3">
           <ProfileCard refreshTrigger={profileRefreshTrigger} />
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <AcceptedReferralsButton count={acceptedCount} />
+            </div>
+            <div className="flex-1">
+              <EditRequestsButton count={editRequestCount} />
+            </div>
+          </div>
         </div>
 
         {/* Center Content */}
@@ -336,57 +434,46 @@ export default function HomePage() {
           {/* Referrals List */}
           <div className="space-y-3">
             {loading ? (
-              <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
+              <div className="bg-[#87c4d8]/25 backdrop-blur-sm rounded shadow border border-[#87c4d8]/50 p-8 text-center text-muted-foreground">
                 Loading referrals...
               </div>
-            ) : filteredReferrals.length === 0 ? (
-              <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
+            ) : visibleReferrals.length === 0 ? (
+              <div className="bg-[#87c4d8]/25 backdrop-blur-sm rounded shadow border border-[#87c4d8]/50 p-8 text-center text-muted-foreground">
                 No referrals yet. Create your first referral!
               </div>
             ) : (
-              filteredReferrals
-                .filter(referral => {
-                  // Exclude pinned referrals (both pending and approved)
-                  if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
-                    return false;
-                  }
-                  return true;
-                })
-                .map((referral) => {
-                  const age = referral.age || 0;
-                  const specialCase = referral.special_case ? ` (${referral.special_case})` : '';
-                  const title = `Referring ${age} yr. old patient for ${referral.treatment_service_destination}${specialCase}`;
-                  
-                  return (
-                    <ReferralCard
-                      key={referral.id}
-                      id={referral.id}
-                      title={title}
-                      medicalAlert={referral.medical_alert || undefined}
-                      clinicalSectionOrigin={referral.clinical_section_origin}
-                      clinicalSectionDestination={referral.clinical_section_destination}
-                      clinicalDisciplineOrigin={referral.clinical_discipline_origin || undefined}
-                      clinicalDisciplineDestination={referral.clinical_discipline_destination || undefined}
-                      treatmentServiceOrigin={referral.treatment_service_origin || undefined}
-                      treatmentServiceDestination={referral.treatment_service_destination || undefined}
-                      notesAndIndications={referral.notes_and_special_indications || undefined}
-                      chartNumber={referral.chart_number}
-                      acceptedBy={referral.accepted_by}
-                      status={referral.status}
-                      showAccept={referral.accepted_by === "None"}
-                      createdAt={referral.created_at}
-                      treatment={referral.treatment || undefined}
-                      medicalHistory={referral.medical_history || undefined}
-                      isFeatured={referral.is_featured}
-                      specialCase={referral.special_case || undefined}
-                      tentativeAppointment={referral.tentative_appointment_schedule || undefined}
-                      age={referral.age ?? undefined}
-                      onUpdate={(id: string, updates: Partial<Referral>) => handleUpdateReferral(id, updates)}
-                      onAccept={() => handleAcceptReferral(referral.id)}
-                      onDelete={handleDeleteReferral}
-                    />
-                  );
-                })
+              visibleReferrals.map((referral) => (
+                <MemoizedReferralCard
+                  key={referral.id}
+                  id={referral.id}
+                  title={`Referring ${referral.age || 0} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
+                  medicalAlert={referral.medical_alert || undefined}
+                  clinicalSectionOrigin={referral.clinical_section_origin}
+                  clinicalSectionDestination={referral.clinical_section_destination}
+                  clinicalDisciplineOrigin={referral.clinical_discipline_origin || undefined}
+                  clinicalDisciplineDestination={referral.clinical_discipline_destination || undefined}
+                  treatmentServiceOrigin={referral.treatment_service_origin || undefined}
+                  treatmentServiceDestination={referral.treatment_service_destination || undefined}
+                  notesAndIndications={referral.notes_and_special_indications || undefined}
+                  chartNumber={referral.chart_number}
+                  acceptedBy={referral.accepted_by}
+                  acceptedAt={referral.accepted_at}
+                  status={referral.status}
+                  showAccept={referral.accepted_by === "None"}
+                  createdAt={referral.created_at}
+                  treatment={referral.treatment || undefined}
+                  medicalHistory={referral.medical_history || undefined}
+                  isFeatured={referral.is_featured}
+                  specialCase={referral.special_case || undefined}
+                  tentativeAppointment={referral.tentative_appointment_schedule || undefined}
+                  age={referral.age ?? undefined}
+                  userId={referral.user_id}
+                  onUpdate={handleUpdateReferral}
+                  onAccept={handleAcceptReferral}
+                  onDelete={handleDeleteReferral}
+                  onEditRequestSubmitted={handleEditRequestSubmitted}
+                />
+              ))
             )}
           </div>
 
@@ -399,70 +486,144 @@ export default function HomePage() {
         {/* Right Sidebar */}
         <aside className="w-full lg:w-[220px] flex-shrink-0 space-y-4 order-1 lg:order-none">
           {/* Advanced Filter Search */}
-          <div className="bg-white/60 backdrop-blur-sm rounded shadow border-2 border-gray-300">
+          <div className="bg-white rounded shadow border-2 border-[#87c4d8]/50">
             <div className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center uppercase tracking-wide">
               ADVANCED FILTER SEARCH
             </div>
             <div className="p-4 space-y-3">
               {/* Clinical Section Dropdown */}
-              <div className="relative">
-                <select 
-                  value={selectedSection}
-                  onChange={(e) => handleSectionChange(e.target.value)}
-                  className="w-full bg-white border-2 border-gray-300 rounded px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-accent"
+              <div ref={sectionRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setIsSectionOpen(p => !p); setIsDisciplineOpen(false); setIsTreatmentOpen(false); }}
+                  className="w-full flex items-center justify-between border-2 border-gray-200 rounded-lg px-3 py-2 text-xs font-semibold bg-white hover:border-secondary transition-colors text-left"
                 >
-                  <option value="">By Clinical Section</option>
-                  {filterTaxonomy.map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {section.name} ({section.shortName})
-                    </option>
-                  ))}
-                </select>
+                  <span className={selectedSection ? "text-secondary" : "text-gray-400"}>
+                    {selectedSection ? filterTaxonomy.find(s => s.id === selectedSection)?.name + " (" + filterTaxonomy.find(s => s.id === selectedSection)?.shortName + ")" : "By Clinical Section"}
+                  </span>
+                  <ChevronDown className={`h-3.5 w-3.5 text-gray-400 transition-transform flex-shrink-0 ${isSectionOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isSectionOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-secondary/30 rounded-lg shadow-lg z-50 overflow-hidden max-h-48 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { handleSectionChange(""); setIsSectionOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${!selectedSection ? "bg-secondary text-white" : "text-gray-500 hover:bg-secondary/10 hover:text-secondary"}`}
+                    >
+                      By Clinical Section
+                    </button>
+                    {filterTaxonomy.map(section => (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() => { handleSectionChange(section.id); setIsSectionOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${selectedSection === section.id ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"}`}
+                      >
+                        {section.name} ({section.shortName})
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Clinical Discipline Dropdown - Only enabled if section is selected, hidden for Prosthodontics */}
+              {/* Clinical Discipline Dropdown */}
               {selectedSection !== "prostho" && (
-                <div className="relative">
-                  <select 
-                    value={selectedDiscipline}
-                    onChange={(e) => handleDisciplineChange(e.target.value)}
+                <div ref={disciplineRef} className="relative">
+                  <button
+                    type="button"
                     disabled={!selectedSection}
-                    className={`w-full border-2 rounded px-3 py-2 text-xs font-semibold focus:outline-none ${
-                      selectedSection 
-                        ? 'bg-white border-gray-300 focus:ring-2 focus:ring-accent text-gray-900' 
-                        : 'bg-muted border-gray-300 text-gray-400 cursor-not-allowed'
+                    onClick={() => { setIsDisciplineOpen(p => !p); setIsSectionOpen(false); setIsTreatmentOpen(false); }}
+                    className={`w-full flex items-center justify-between border-2 rounded-lg px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                      selectedSection ? "border-gray-200 bg-white hover:border-secondary" : "border-gray-100 bg-gray-50 cursor-not-allowed"
                     }`}
                   >
-                    <option value="">By Clinical Discipline</option>
-                    {getAvailableDisciplines().map((discipline) => (
-                      <option key={discipline.id} value={discipline.id}>
-                        {discipline.name}
-                      </option>
-                    ))}
-                  </select>
+                    <span className={selectedDiscipline ? "text-secondary" : "text-gray-400"}>
+                      {selectedDiscipline ? getAvailableDisciplines().find(d => d.id === selectedDiscipline)?.name : "By Clinical Discipline"}
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-gray-400 transition-transform flex-shrink-0 ${isDisciplineOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {isDisciplineOpen && selectedSection && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-secondary/30 rounded-lg shadow-lg z-50 overflow-hidden max-h-48 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => { handleDisciplineChange(""); setIsDisciplineOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${!selectedDiscipline ? "bg-secondary text-white" : "text-gray-500 hover:bg-secondary/10 hover:text-secondary"}`}
+                      >
+                        By Clinical Discipline
+                      </button>
+                      {getAvailableDisciplines().map(discipline => (
+                        <button
+                          key={discipline.id}
+                          type="button"
+                          onClick={() => { handleDisciplineChange(discipline.id); setIsDisciplineOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${selectedDiscipline === discipline.id ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"}`}
+                        >
+                          {discipline.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Treatment Service Dropdown - Only enabled if both section and discipline are selected (or Prosthodontics) */}
-              <div className="relative">
-                <select 
-                  value={selectedTreatment}
-                  onChange={(e) => handleTreatmentChange(e.target.value)}
-                  disabled={!selectedSection || (!selectedDiscipline && selectedSection !== "prostho")}
-                  className={`w-full border-2 rounded px-3 py-2 text-xs font-semibold focus:outline-none ${
-                    selectedSection && (selectedDiscipline || selectedSection === "prostho")
-                      ? 'bg-white border-gray-300 focus:ring-2 focus:ring-accent text-gray-900' 
-                      : 'bg-muted border-gray-300 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  <option value="">By Treatment Service</option>
-                  {getAvailableTreatments().map((treatment) => (
-                    <option key={treatment.id} value={treatment.id}>
-                      {treatment.name}
-                    </option>
-                  ))}
-                </select>
+              {/* Treatment Service Dropdown */}
+              <div ref={treatmentRef} className="relative">
+                {(() => {
+                  const isEnabled = !!selectedSection && (!!selectedDiscipline || selectedSection === "prostho");
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        disabled={!isEnabled}
+                        onClick={() => { setIsTreatmentOpen(p => !p); setIsSectionOpen(false); setIsDisciplineOpen(false); }}
+                        className={`w-full flex items-center justify-between border-2 rounded-lg px-3 py-2 text-xs font-semibold text-left transition-colors ${
+                          isEnabled ? "border-gray-200 bg-white hover:border-secondary" : "border-gray-100 bg-gray-50 cursor-not-allowed"
+                        }`}
+                      >
+                        <span className={selectedTreatment ? "text-secondary" : "text-gray-400"}>
+                          {selectedTreatment ? getAvailableTreatments().find(t => t.id === selectedTreatment)?.name : "By Treatment Service"}
+                        </span>
+                        <ChevronDown className={`h-3.5 w-3.5 text-gray-400 transition-transform flex-shrink-0 ${isTreatmentOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {isTreatmentOpen && isEnabled && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white border-2 border-secondary/30 rounded-lg shadow-lg z-50 overflow-hidden max-h-48 overflow-y-auto">
+                          <button
+                            type="button"
+                            onClick={() => { handleTreatmentChange(""); setIsTreatmentOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${!selectedTreatment ? "bg-secondary text-white" : "text-gray-500 hover:bg-secondary/10 hover:text-secondary"}`}
+                          >
+                            By Treatment Service
+                          </button>
+                          {getAvailableTreatments().map(treatment => (
+                            <button
+                              key={treatment.id}
+                              type="button"
+                              onClick={() => { handleTreatmentChange(treatment.id); setIsTreatmentOpen(false); }}
+                              className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${selectedTreatment === treatment.id ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"}`}
+                            >
+                              {treatment.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
+
+              {/* Special Case Input */}
+              <input
+                type="text"
+                placeholder="By Special Case"
+                value={specialCaseFilter}
+                onChange={(e) => setSpecialCaseFilter(e.target.value)}
+                disabled={!selectedSection || !selectedDiscipline || !selectedTreatment}
+                className={`w-full px-3 py-2.5 text-xs font-semibold border-2 rounded-lg outline-none transition-all ${
+                  !selectedSection || !selectedDiscipline || !selectedTreatment
+                    ? "border-gray-100 bg-gray-50 text-gray-300 placeholder:text-gray-300 cursor-not-allowed"
+                    : "border-gray-200 text-secondary placeholder:text-gray-400 focus:border-secondary focus:ring-1 focus:ring-secondary/20"
+                }`}
+              />
 
               <div className="flex gap-2">
                 <Button 
@@ -471,11 +632,11 @@ export default function HomePage() {
                 >
                   SEARCH
                 </Button>
-                {(selectedSection || selectedDiscipline || selectedTreatment) && (
+                {(selectedSection || selectedDiscipline || selectedTreatment || specialCaseFilter) && (
                   <Button 
                     onClick={handleResetFilters}
                     variant="outline"
-                    className="text-xs font-bold uppercase tracking-wide"
+                    className="text-xs font-bold uppercase tracking-wide border-2 border-gray-200 hover:border-secondary hover:text-secondary"
                   >
                     RESET
                   </Button>
@@ -485,7 +646,7 @@ export default function HomePage() {
           </div>
 
           {/* Featured Referrals */}
-          <div className="bg-white/60 backdrop-blur-sm border-2 border-gray-300 rounded shadow overflow-hidden">
+          <div className="bg-[#87c4d8]/25 backdrop-blur-sm border-2 border-[#87c4d8]/50 rounded shadow overflow-hidden">
             <div className="bg-secondary text-white text-xs font-bold py-2.5 px-4 text-center uppercase tracking-wide">
               FEATURED REFERRALS
             </div>
@@ -510,7 +671,7 @@ export default function HomePage() {
                   {/* Card */}
                   <div className="mx-4 w-full">
                     {featuredReferrals[currentSlide] && (
-                      <FeaturedReferralCard
+                      <MemoizedFeaturedReferralCard
                         id={featuredReferrals[currentSlide].id}
                         title={`Referring ${featuredReferrals[currentSlide].age || 0} yr. old patient for ${featuredReferrals[currentSlide].treatment_service_destination}${featuredReferrals[currentSlide].special_case ? ` (${featuredReferrals[currentSlide].special_case})` : ''}`}
                         medicalAlert={featuredReferrals[currentSlide].medical_alert || undefined}
@@ -523,6 +684,7 @@ export default function HomePage() {
                         notesAndIndications={featuredReferrals[currentSlide].notes_and_special_indications || undefined}
                         chartNumber={featuredReferrals[currentSlide].chart_number}
                         acceptedBy={featuredReferrals[currentSlide].accepted_by}
+                        acceptedAt={featuredReferrals[currentSlide].accepted_at}
                         status={featuredReferrals[currentSlide].status}
                         createdAt={featuredReferrals[currentSlide].created_at}
                         treatment={featuredReferrals[currentSlide].treatment || undefined}
@@ -531,9 +693,11 @@ export default function HomePage() {
                         specialCase={featuredReferrals[currentSlide].special_case || undefined}
                         tentativeAppointment={featuredReferrals[currentSlide].tentative_appointment_schedule || undefined}
                         age={featuredReferrals[currentSlide].age ?? undefined}
-                        onAccept={() => handleAcceptReferral(featuredReferrals[currentSlide].id)}
-                        onUpdate={(id, updates) => handleUpdateReferral(id, updates)}
+                        userId={featuredReferrals[currentSlide].user_id}
+                        onAccept={handleAcceptReferral}
+                        onUpdate={handleUpdateReferral}
                         onDelete={handleDeleteReferral}
+                        onEditRequestSubmitted={handleEditRequestSubmitted}
                       />
                     )}
                   </div>
@@ -613,16 +777,16 @@ export default function HomePage() {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setIsDeleteConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  CANCEL
-                </button>
-                <button
                   onClick={confirmDeleteReferral}
                   className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
                 >
                   YES, DELETE
+                </button>
+                <button
+                  onClick={() => setIsDeleteConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
                 </button>
               </div>
             </div>
@@ -653,16 +817,16 @@ export default function HomePage() {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setIsAcceptConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  CANCEL
-                </button>
-                <button
                   onClick={confirmAcceptReferral}
                   className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
                 >
                   YES, ACCEPT
+                </button>
+                <button
+                  onClick={() => setIsAcceptConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
                 </button>
               </div>
             </div>
@@ -671,5 +835,6 @@ export default function HomePage() {
       )}
       </div>
     </div>
+    </RouteGuard>
   );
 }

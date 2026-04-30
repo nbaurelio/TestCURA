@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { Calendar, Users } from "lucide-react";
+import { Calendar, Users, Pencil, BarChart3 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { getMockUserProfile, Profile } from "@/lib/api/profiles";
+import { getMockUserProfile, Profile, hasProfileCache, getMockUserProfileSync } from "@/lib/api/profiles";
+import { EditProfileModal } from "@/components/modals/EditProfileModal";
+import { useAuth } from "@/context/AuthContext";
 
 interface ProfileCardProps {
   name?: string;
@@ -21,16 +23,15 @@ export function ProfileCard({
   avatarUrl,
   refreshTrigger,
 }: ProfileCardProps) {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Initialize with cached data to prevent avatar flickering on navigation
+  const { role: userRole } = useAuth();
+  const [profile, setProfile] = useState<Profile | null>(getMockUserProfileSync());
+  // Only show loading on initial load if no cache exists
+  const [loading, setLoading] = useState(!hasProfileCache());
+  const [editOpen, setEditOpen] = useState(false);
 
-  useEffect(() => {
-    loadProfile();
-  }, [refreshTrigger]);
-
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
-      setLoading(true);
       const data = await getMockUserProfile();
       setProfile(data);
     } catch (error) {
@@ -38,19 +39,28 @@ export function ProfileCard({
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Get initials from name
-  const getInitials = (fullName: string) => {
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile, refreshTrigger]);
+
+  // Get initials from name - memoized
+  const getInitials = useCallback((fullName: string) => {
     return fullName.split(" ").map(n => n[0]).join("").toUpperCase();
-  };
+  }, []);
 
-  // Use props if provided, otherwise use database data
-  const displayName = name || (profile ? `${profile.first_name} ${profile.last_name}` : "User");
-  const displayDepartment = department || profile?.clinical_department || "N/A";
-  const displayYearLevel = yearLevel || profile?.year_level || "N/A";
-  const displayBatchName = profile?.batch_name || null;
-  const displayAvatarUrl = avatarUrl || profile?.avatar_url || "https://via.placeholder.com/100x100/c4956a/ffffff?text=U";
+  // Use props if provided, otherwise use database data - memoized
+  const displayData = useMemo(() => ({
+    name: name || (profile ? `${profile.first_name} ${profile.last_name}` : "User"),
+    department: department || profile?.clinical_department || "N/A",
+    yearLevel: yearLevel || profile?.year_level || "N/A",
+    batchName: profile?.batch_name || null,
+    avatarUrl: avatarUrl || profile?.avatar_url || "https://via.placeholder.com/100x100/c4956a/ffffff?text=U"
+  }), [name, department, yearLevel, avatarUrl, profile]);
+
+  // Destructure display data
+  const { name: displayName, department: displayDepartment, yearLevel: displayYearLevel, batchName: displayBatchName, avatarUrl: displayAvatarUrl } = displayData;
 
   if (loading) {
     return (
@@ -63,7 +73,16 @@ export function ProfileCard({
   }
 
   return (
-    <div className="rounded-xl border-2 border-secondary/60 bg-gradient-to-b from-white to-secondary/5 overflow-hidden" style={{ boxShadow: "0 4px 24px 0 rgba(30, 64, 175, 0.18), 0 1.5px 6px 0 rgba(30, 64, 175, 0.10)" }}>
+    <>
+    <EditProfileModal open={editOpen} onOpenChange={setEditOpen} onSave={loadProfile} />
+    <div className="relative rounded-xl border-2 border-secondary/60 bg-gradient-to-b from-white to-secondary/5 overflow-hidden" style={{ boxShadow: "0 4px 24px 0 rgba(30, 64, 175, 0.18), 0 1.5px 6px 0 rgba(30, 64, 175, 0.10)" }}>
+      <button
+        onClick={() => setEditOpen(true)}
+        className="absolute top-2.5 right-2.5 p-1.5 rounded-lg text-secondary/60 hover:text-secondary hover:bg-secondary/10 transition-colors z-10"
+        title="Edit Profile"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
       <div className="pt-5 pb-4 px-4 text-center">
         {/* Avatar with glowing ring */}
         <div className="relative inline-block mb-3">
@@ -108,8 +127,18 @@ export function ProfileCard({
           >
             <Users className="h-4 w-4" />
           </Link>
+          {userRole === "professor" && (
+            <Link
+              href="/professor"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-secondary/30 text-secondary hover:bg-secondary/10 transition-colors"
+              title="Professor Dashboard"
+            >
+              <BarChart3 className="h-4 w-4" />
+            </Link>
+          )}
         </div>
       </div>
     </div>
+    </>
   );
 }

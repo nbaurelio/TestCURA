@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,8 @@ import {
 import Link from "next/link";
 import { createEvent, getEvents, updateEvent, deleteEvent, EventFormData } from "@/lib/api/events";
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
-import { getProfile } from "@/lib/api/profiles";
+import { getMockUserProfile } from "@/lib/api/profiles";
+import { RouteGuard } from "@/components/auth/RouteGuard";
 
 const days = ["SUN", "MON", "TUES", "WED", "THURS", "FRI", "SAT"];
 const dates = [4, 5, 6, 7, 8, 9, 10];
@@ -106,8 +107,7 @@ function SchedulePageInner() {
 
   const loadUserName = async () => {
     try {
-      const mockUserId = "00000000-0000-0000-0000-000000000000";
-      const profile = await getProfile(mockUserId);
+      const profile = await getMockUserProfile();
       if (profile?.first_name) {
         setUserFirstName(profile.first_name);
       }
@@ -313,7 +313,46 @@ function SchedulePageInner() {
       slotEnd.setMinutes(slotEnd.getMinutes() + 30);
       
       return eventStart < slotEnd && eventEnd > slotStart;
+    }).sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  };
+
+  // Get all overlapping events for a given day to determine max columns needed
+  const getMaxColumnsForDay = (date: Date) => {
+    let maxColumns = 1;
+    times.forEach(time => {
+      const slotEvents = getEventsForTimeSlot(date, time);
+      maxColumns = Math.max(maxColumns, slotEvents.length);
     });
+    return maxColumns;
+  };
+
+  const roundToNearestHalfHour = (dateTimeString: string): string => {
+    if (!dateTimeString) return dateTimeString;
+    
+    const date = new Date(dateTimeString);
+    const minutes = date.getMinutes();
+    const hours = date.getHours();
+    
+    // Round to nearest 30 minutes
+    const roundedMinutes = minutes < 15 ? 0 : minutes < 45 ? 30 : 0;
+    const roundedHours = minutes >= 45 ? hours + 1 : hours;
+    
+    // Enforce 6am-6pm range
+    const clampedHours = Math.max(6, Math.min(18, roundedHours));
+    
+    date.setHours(clampedHours);
+    date.setMinutes(roundedMinutes);
+    date.setSeconds(0);
+    date.setMilliseconds(0);
+    
+    // Convert back to datetime-local format
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hour = String(date.getHours()).padStart(2, '0');
+    const minute = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hour}:${minute}`;
   };
 
   const handleTimeSlotClick = (date: Date, time: string) => {
@@ -404,7 +443,7 @@ function SchedulePageInner() {
               <select
                 value={selectedYear}
                 onChange={(e) => handleYearChange(Number(e.target.value))}
-                className="px-3 py-1.5 text-sm border-2 border-gray-300 rounded bg-white text-secondary font-bold hover:bg-muted focus:outline-none focus:ring-2 focus:ring-accent uppercase tracking-wide"
+                className="px-3 py-1.5 text-sm border-2 border-gray-300 rounded-md bg-white text-secondary font-bold hover:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary uppercase tracking-wide cursor-pointer transition-colors"
               >
                 {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map(year => (
                   <option key={year} value={year}>{year}</option>
@@ -459,8 +498,9 @@ function SchedulePageInner() {
                   </div>
                   {weekDates.map((date, idx) => {
                     const slotEvents = getEventsForTimeSlot(date, time);
-                    const eventsStartingHere = slotEvents.filter(e => isEventStart(e, date, time));
+                    const maxColumns = getMaxColumnsForDay(date);
                     const isToday = date.toDateString() === new Date().toDateString();
+                    const columnWidth = `${100 / maxColumns}%`;
                     
                     return (
                       <div
@@ -469,25 +509,52 @@ function SchedulePageInner() {
                           isToday ? 'bg-secondary/5 rounded-lg' : ''
                         }`}
                       >
-                        {eventsStartingHere.length > 0 ? (
+                        {slotEvents.length > 0 ? (
                           <div className="flex gap-0.5 absolute w-full" style={{ zIndex: 10 }}>
-                            {eventsStartingHere.map((ev, evIdx) => (
+                            {slotEvents.map((ev, evIdx) => {
+                              const isStarting = isEventStart(ev, date, time);
+                              
+                              if (isStarting) {
+                                return (
+                                  <div
+                                    key={ev.id}
+                                    onClick={() => handleEventClick(ev)}
+                                    className="text-white rounded text-[10px] font-bold overflow-hidden cursor-pointer transition-opacity hover:opacity-80 flex items-center justify-center p-1 shadow"
+                                    style={{
+                                      backgroundColor: ev.color || "#1e3a5f",
+                                      height: `calc(${getEventDurationInSlots(ev) * 2}rem + ${(getEventDurationInSlots(ev) - 1) * 0.5}rem)`,
+                                      width: columnWidth,
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    <span className="text-center leading-tight truncate">{ev.title}</span>
+                                  </div>
+                                );
+                              } else {
+                                // Placeholder for continuing events to maintain column alignment
+                                return (
+                                  <div
+                                    key={ev.id}
+                                    style={{
+                                      width: columnWidth,
+                                      minWidth: 0,
+                                    }}
+                                  />
+                                );
+                              }
+                            })}
+                            {/* Fill remaining columns with empty space */}
+                            {Array.from({ length: maxColumns - slotEvents.length }).map((_, i) => (
                               <div
-                                key={ev.id}
-                                onClick={() => handleEventClick(ev)}
-                                className="text-white rounded text-[10px] font-bold overflow-hidden cursor-pointer transition-opacity hover:opacity-80 flex items-center justify-center p-1 shadow"
+                                key={`empty-${i}`}
                                 style={{
-                                  backgroundColor: ev.color || "#1e3a5f",
-                                  height: `calc(${getEventDurationInSlots(ev) * 2}rem + ${(getEventDurationInSlots(ev) - 1) * 0.5}rem)`,
-                                  flex: 1,
+                                  width: columnWidth,
                                   minWidth: 0,
                                 }}
-                              >
-                                <span className="text-center leading-tight truncate">{ev.title}</span>
-                              </div>
+                              />
                             ))}
                           </div>
-                        ) : slotEvents.length === 0 ? (
+                        ) : (
                           <div 
                             onClick={() => handleTimeSlotClick(date, time)}
                             className={`rounded-lg h-8 hover:bg-primary/30 cursor-pointer transition-colors ${
@@ -496,8 +563,6 @@ function SchedulePageInner() {
                                 : 'bg-gray-50 border border-gray-200'
                             }`}
                           />
-                        ) : (
-                          <div className="h-8" />
                         )}
                       </div>
                     );
@@ -515,10 +580,17 @@ function SchedulePageInner() {
       {/* Event Details Modal */}
       <Dialog open={isEventDetailsOpen && !isDeleteConfirmOpen} onOpenChange={setIsEventDetailsOpen}>
         <DialogContent className="bg-white max-w-[380px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader className="p-3 sm:p-4 sticky top-0 z-10" style={{ backgroundColor: selectedEvent?.color || '#1e3a5f' }}>
+          <DialogHeader className="p-3 sm:p-4 sticky top-0 z-10 flex flex-row items-center justify-between" style={{ backgroundColor: selectedEvent?.color || '#1e3a5f' }}>
             <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
               Event Details
             </DialogTitle>
+            <button
+              type="button"
+              onClick={() => setIsEventDetailsOpen(false)}
+              className="text-white/70 hover:text-white transition-colors rounded p-0.5 hover:bg-white/20"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </DialogHeader>
 
           {selectedEvent && (
@@ -626,10 +698,17 @@ function SchedulePageInner() {
       {/* Create Event Modal */}
       <Dialog open={isModalOpen && !isSaveConfirmOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="bg-white max-w-[380px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10">
+          <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10 flex flex-row items-center justify-between">
             <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
               {isEditMode ? "Edit Event" : "Create Event"}
             </DialogTitle>
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              className="text-white/70 hover:text-white transition-colors rounded p-0.5 hover:bg-white/20"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </DialogHeader>
 
           <form onSubmit={handleSaveEvent} className="p-3 sm:p-4 space-y-2.5 sm:space-y-3">
@@ -663,10 +742,10 @@ function SchedulePageInner() {
             </div>
 
             {/* Location */}
-            <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 border border-green-200">
-              <label className="text-[10px] font-bold text-green-700 uppercase tracking-wide mb-1.5 block">Location</label>
+            <div>
+              <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Location</label>
               <select
-                className="h-8 w-full text-xs border border-green-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-green-500 bg-white"
+                className="h-9 w-full text-xs border-2 border-gray-300 rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-white font-semibold text-gray-700 cursor-pointer hover:border-secondary transition-colors"
                 value={formData.location}
                 onChange={(e) => setFormData({...formData, location: e.target.value})}
               >
@@ -691,26 +770,82 @@ function SchedulePageInner() {
             </div>
 
             {/* Date & Time */}
-            <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 space-y-2">
+            <div className="space-y-3">
               <div>
                 <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Event Start Date & Time *</label>
-                <Input 
-                  className="h-8 text-xs border-gray-300 focus:ring-secondary" 
-                  type="datetime-local" 
-                  value={formData.start_time}
-                  onChange={(e) => setFormData({...formData, start_time: e.target.value})}
-                  required
-                />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Input 
+                    className="w-full sm:flex-1 h-9 text-xs border-2 border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary font-medium" 
+                    type="date" 
+                    value={formData.start_time ? formData.start_time.split('T')[0] : ''}
+                    onChange={(e) => {
+                      const date = e.target.value;
+                      const time = formData.start_time ? formData.start_time.split('T')[1] : '06:00';
+                      setFormData({...formData, start_time: `${date}T${time}`});
+                    }}
+                    required
+                  />
+                  <select
+                    className="w-28 h-9 text-xs border-2 border-secondary rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-secondary font-bold text-white cursor-pointer hover:bg-secondary/90 transition-colors [&>option]:bg-white [&>option]:text-gray-700 [&>option]:font-semibold"
+                    value={formData.start_time ? formData.start_time.split('T')[1]?.substring(0, 5) : '06:00'}
+                    onChange={(e) => {
+                      const date = formData.start_time ? formData.start_time.split('T')[0] : new Date().toISOString().split('T')[0];
+                      setFormData({...formData, start_time: `${date}T${e.target.value}`});
+                    }}
+                    required
+                  >
+                    {Array.from({ length: 25 }, (_, i) => {
+                      const hour = Math.floor(i / 2) + 6;
+                      const minute = i % 2 === 0 ? '00' : '30';
+                      const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+                      const period = hour >= 12 ? 'pm' : 'am';
+                      const value = `${String(hour).padStart(2, '0')}:${minute}`;
+                      return (
+                        <option key={value} value={value}>
+                          {displayHour}:{minute}{period}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Event End Date & Time *</label>
-                <Input 
-                  className="h-8 text-xs border-gray-300 focus:ring-secondary" 
-                  type="datetime-local" 
-                  value={formData.end_time}
-                  onChange={(e) => setFormData({...formData, end_time: e.target.value})}
-                  required
-                />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Input 
+                    className="w-full sm:flex-1 h-9 text-xs border-2 border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary font-medium" 
+                    type="date" 
+                    value={formData.end_time ? formData.end_time.split('T')[0] : ''}
+                    onChange={(e) => {
+                      const date = e.target.value;
+                      const time = formData.end_time ? formData.end_time.split('T')[1] : '06:30';
+                      setFormData({...formData, end_time: `${date}T${time}`});
+                    }}
+                    required
+                  />
+                  <select
+                    className="w-28 h-9 text-xs border-2 border-secondary rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-secondary font-bold text-white cursor-pointer hover:bg-secondary/90 transition-colors [&>option]:bg-white [&>option]:text-gray-700 [&>option]:font-semibold"
+                    value={formData.end_time ? formData.end_time.split('T')[1]?.substring(0, 5) : '06:30'}
+                    onChange={(e) => {
+                      const date = formData.end_time ? formData.end_time.split('T')[0] : new Date().toISOString().split('T')[0];
+                      setFormData({...formData, end_time: `${date}T${e.target.value}`});
+                    }}
+                    required
+                  >
+                    {Array.from({ length: 25 }, (_, i) => {
+                      const hour = Math.floor(i / 2) + 6;
+                      const minute = i % 2 === 0 ? '00' : '30';
+                      const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+                      const period = hour >= 12 ? 'pm' : 'am';
+                      const value = `${String(hour).padStart(2, '0')}:${minute}`;
+                      return (
+                        <option key={value} value={value}>
+                          {displayHour}:{minute}{period}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -806,16 +941,16 @@ function SchedulePageInner() {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setIsSaveConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  CANCEL
-                </button>
-                <button
                   onClick={confirmSaveEvent}
                   className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
                 >
                   {isEditMode ? 'YES, SAVE CHANGES' : 'YES, CREATE'}
+                </button>
+                <button
+                  onClick={() => setIsSaveConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
                 </button>
               </div>
             </div>
@@ -849,16 +984,16 @@ function SchedulePageInner() {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setIsDeleteConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  CANCEL
-                </button>
-                <button
                   onClick={confirmDeleteEvent}
                   className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
                 >
                   YES, DELETE
+                </button>
+                <button
+                  onClick={() => setIsDeleteConfirmOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  CANCEL
                 </button>
               </div>
             </div>
@@ -874,8 +1009,10 @@ function SchedulePageInner() {
 
 export default function SchedulePage() {
   return (
+    <RouteGuard allowedRoles={["clinician", "professor"]}>
     <Suspense fallback={null}>
       <SchedulePageInner />
     </Suspense>
+    </RouteGuard>
   );
 }

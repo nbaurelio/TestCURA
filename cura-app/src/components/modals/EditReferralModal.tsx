@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Referral } from "@/lib/api/referrals";
 import { Button } from "@/components/ui/button";
@@ -202,6 +203,8 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
       ...formData,
       age: formData.age ? parseInt(formData.age) : null,
       tentative_appointment_schedule: formData.tentative_appointment_schedule || null,
+      edit_request_reason: null,
+      edit_request_status: null,
     });
     setIsConfirmOpen(false);
     onClose();
@@ -209,7 +212,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
 
   return (
     <>
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen && !isConfirmOpen} onOpenChange={onClose}>
         <DialogContent className="bg-white max-w-[420px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto [&>button:last-child]:hidden">
           <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10 flex flex-row items-start justify-between">
             <div>
@@ -400,35 +403,45 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
         </DialogContent>
     </Dialog>
 
-    {/* Separate confirmation dialog */}
-    <Dialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
-      <DialogContent className="bg-white max-w-sm rounded-2xl shadow-2xl p-6 text-center [&>button:last-child]:hidden">
-        <DialogTitle className="sr-only">Confirm Save</DialogTitle>
-        <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
-          <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
+    {/* Separate confirmation dialog — portaled to body */}
+    {isConfirmOpen && createPortal(
+      <div className="fixed inset-0 z-[100] flex items-center justify-center">
+        <div
+          className="absolute inset-0 bg-black/20"
+          onClick={() => setIsConfirmOpen(false)}
+        />
+        <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
+          <div className="text-center">
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+              <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Save Changes</h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              Are you sure you want to save the changes to this referral?
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={confirmSave}
+                className="flex-1 px-6 py-2 bg-success text-white text-xs font-bold rounded hover:bg-success/90 transition-colors shadow uppercase tracking-wide"
+              >
+                YES, SAVE
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsConfirmOpen(false)}
+                className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
+              >
+                CANCEL
+              </button>
+            </div>
+          </div>
         </div>
-        <h3 className="text-lg font-bold text-secondary mb-2">Save Changes</h3>
-        <p className="text-sm text-gray-600 mb-6">Are you sure you want to save the changes to this referral?</p>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => setIsConfirmOpen(false)}
-            className="flex-1 px-4 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            CANCEL
-          </button>
-          <button
-            type="button"
-            onClick={confirmSave}
-            className="flex-1 px-4 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
-          >
-            YES, SAVE
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
+      </div>,
+      document.body
+    )}
     </>
   );
 }

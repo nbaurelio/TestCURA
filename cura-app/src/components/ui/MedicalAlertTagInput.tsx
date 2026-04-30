@@ -96,7 +96,7 @@ export function MedicalAlertTagInput({
     if (val.trim().length > 0) {
       const filtered = MEDICAL_ALERT_SUGGESTIONS.filter(
         (s) =>
-          s.toLowerCase().includes(val.toLowerCase()) &&
+          s.toLowerCase().startsWith(val.toLowerCase()) &&
           !tags.includes(s)
       );
       setSuggestions(filtered.slice(0, 6));

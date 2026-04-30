@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -8,49 +8,96 @@ import { ProfileCard } from "@/components/sidebar/ProfileCard";
 import { SchedulePlanner } from "@/components/sidebar/SchedulePlanner";
 import { ReferralCard } from "@/components/referrals/ReferralCard";
 import { getReferrals, deleteReferral, updateReferral, Referral } from "@/lib/api/referrals";
+import { getCurrentUserId, getProfile } from "@/lib/api/profiles";
+import { supabase } from "@/lib/supabase";
+import { RouteGuard } from "@/components/auth/RouteGuard";
 
 export default function AcceptedReferralsPage() {
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserName, setCurrentUserName] = useState<string>("");
+  const [acceptedReferralIds, setAcceptedReferralIds] = useState<Set<string>>(new Set());
+  const [logsLoaded, setLogsLoaded] = useState(false);
 
   useEffect(() => {
+    const fetchUserName = async () => {
+      const profile = await getProfile(getCurrentUserId());
+      if (profile) {
+        setCurrentUserName(`${profile.first_name} ${profile.last_name}`);
+      }
+    };
+    const fetchAcceptedByCurrentUser = async () => {
+      const userId = getCurrentUserId();
+      const { data } = await (supabase.from("activity_logs") as any)
+        .select("metadata")
+        .eq("action", "ACCEPT_REFERRAL")
+        .eq("user_id", userId);
+      if (data) {
+        const ids = new Set<string>(
+          (data as any[]).map((log: any) => {
+            try {
+              const parsed = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
+              return parsed?.referral_id;
+            } catch { return null; }
+          }).filter(Boolean)
+        );
+        setAcceptedReferralIds(ids);
+      }
+      setLogsLoaded(true);
+    };
+    fetchUserName();
+    fetchAcceptedByCurrentUser();
     loadReferrals();
   }, []);
 
-  const loadReferrals = async () => {
+  const loadReferrals = useCallback(async () => {
     try {
-      const data = await getReferrals();
+      const data = await getReferrals(false); // Bypass cache for fresh data
       setReferrals(data || []);
     } catch (error) {
       console.error("Error loading referrals:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleDeleteReferral = async (id: string) => {
+  const handleDeleteReferral = useCallback(async (id: string) => {
     try {
       await deleteReferral(id);
       loadReferrals();
     } catch (error) {
       console.error("Error deleting referral:", error);
     }
-  };
+  }, [loadReferrals]);
 
   const handleUpdateReferral = (id: string) => {
     console.log("Update referral:", id);
   };
 
-  // Filter for accepted/featured referrals (both pending and approved status)
-  const acceptedReferrals = referrals.filter(
-    (referral) =>
-      referral.is_featured &&
-      referral.accepted_by &&
-      referral.accepted_by !== "None" &&
-      (referral.status === "pending" || referral.status === "approved")
-  );
+  const handleStatusChange = useCallback(async (id: string, newStatus: string) => {
+    try {
+      await updateReferral(id, { referral_status: newStatus } as any);
+      loadReferrals();
+    } catch (error) {
+      console.error("Error updating referral status:", error);
+    }
+  }, [loadReferrals]);
+
+  // Only show referrals accepted by the current user, identified by activity log
+  const acceptedReferrals = useMemo(() => {
+    if (!logsLoaded) return [];
+    return referrals.filter(
+      (referral) =>
+        referral.is_featured &&
+        referral.accepted_by &&
+        referral.accepted_by !== "None" &&
+        acceptedReferralIds.has(referral.id) &&
+        (referral.status === "pending" || referral.status === "approved")
+    );
+  }, [referrals, acceptedReferralIds, logsLoaded]);
 
   return (
+    <RouteGuard allowedRoles={["clinician"]}>
     <div className="min-h-screen flex flex-col relative">
       {/* Background Image */}
       <div 
@@ -115,10 +162,16 @@ export default function AcceptedReferralsPage() {
                     notesAndIndications={referral.notes_and_special_indications || undefined}
                     chartNumber={referral.chart_number}
                     acceptedBy={referral.accepted_by || undefined}
+                    acceptedAt={referral.accepted_at}
                     status={referral.status}
                     showAccept={false}
-                    showUpdate={true}
-                    onUpdate={handleUpdateReferral}
+                    showUpdate={false}
+                    userId={referral.user_id}
+                    acceptedReferralsPage={true}
+                    referralStatus={referral.referral_status}
+                    rereferRequestStatus={referral.rerefer_request_status}
+                    onStatusChange={handleStatusChange}
+                    onRerefer={() => loadReferrals()}
                     onDelete={() => handleDeleteReferral(referral.id)}
                   />
                 ))
@@ -135,5 +188,6 @@ export default function AcceptedReferralsPage() {
         <Footer />
       </div>
     </div>
+    </RouteGuard>
   );
 }

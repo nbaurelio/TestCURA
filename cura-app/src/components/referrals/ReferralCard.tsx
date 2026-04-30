@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, memo, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ViewDetailsModal } from "@/components/modals/ViewDetailsModal";
 import { EditReferralModal } from "@/components/modals/EditReferralModal";
-import { Referral } from "@/lib/api/referrals";
+import { Referral, submitEditRequest, submitRereferRequest, submitDeletionRequest } from "@/lib/api/referrals";
+import { getCurrentUserId } from "@/lib/api/profiles";
 
 interface ReferralCardProps {
   id: string;
@@ -27,6 +29,7 @@ interface ReferralCardProps {
   notesAndIndications?: string;
   chartNumber?: string;
   acceptedBy?: string;
+  acceptedAt?: string | null;
   status?: string;
   showAccept?: boolean;
   showUpdate?: boolean;
@@ -39,11 +42,28 @@ interface ReferralCardProps {
   specialCase?: string;
   tentativeAppointment?: string;
   age?: number;
+  userId?: string;
+  showEditOption?: boolean;
+  editRequestReason?: string | null;
+  editRequestStatus?: string | null;
   onUpdate?: (id: string, updates: Partial<Referral>) => void;
   onAccept?: (id: string) => void;
   onApprove?: (id: string) => void;
   onDecline?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onApproveEditRequest?: (id: string) => void;
+  onDeclineEditRequest?: (id: string) => void;
+  onEditRequestSubmitted?: () => void;
+  editRequestPage?: boolean;
+  onCancelEditRequest?: (id: string) => void;
+  acceptedReferralsPage?: boolean;
+  referralStatus?: string | null;
+  onStatusChange?: (id: string, status: string) => void;
+  onRerefer?: (id: string) => void;
+  rereferRequestStatus?: string | null;
+  deletionRequestStatus?: string | null;
+  isProfessor?: boolean;
+  isAdvisee?: boolean;
 }
 
 function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onCancel: () => void; onConfirm: () => void }) {
@@ -61,18 +81,189 @@ function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onC
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={onCancel}
-            className="flex-1 px-4 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            CANCEL
-          </button>
-          <button
-            type="button"
             onClick={onConfirm}
             className="flex-1 px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
           >
             YES, DELETE
           </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 px-4 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            CANCEL
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditRequestDialog({ open, onCancel, onSubmit }: { open: boolean; onCancel: () => void; onSubmit: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+
+  const handleSubmit = () => {
+    if (reason.trim()) {
+      onSubmit(reason.trim());
+      setReason("");
+    }
+  };
+
+  const handleClose = () => {
+    setReason("");
+    onCancel();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden">
+        <div className="bg-secondary px-6 py-4">
+          <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Request to Edit</DialogTitle>
+          <p className="text-white/70 text-[10px] mt-0.5">Please provide a reason for your edit request</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
+              Reason for Edit Request
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Enter the reason for your edit request..."
+              className="w-full min-h-[100px] text-xs border-2 border-gray-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary resize-none"
+            />
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!reason.trim()}
+              className="flex-1 px-4 py-2.5 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              SUBMIT REQUEST
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors uppercase tracking-wide"
+            >
+              CANCEL
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteRequestDialog({ open, onCancel, onSubmit }: { open: boolean; onCancel: () => void; onSubmit: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+
+  const handleSubmit = () => {
+    if (reason.trim()) {
+      onSubmit(reason.trim());
+      setReason("");
+    }
+  };
+
+  const handleClose = () => {
+    setReason("");
+    onCancel();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden">
+        <div className="bg-red-600 px-6 py-4">
+          <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Request to Delete</DialogTitle>
+          <p className="text-white/70 text-[10px] mt-0.5">Please provide a reason for your deletion request</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-[10px] font-bold text-red-700 uppercase tracking-wide mb-1.5 block">
+              Reason for Deletion Request
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Enter the reason for your deletion request..."
+              className="w-full min-h-[100px] text-xs border-2 border-gray-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none"
+            />
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!reason.trim()}
+              className="flex-1 px-4 py-2.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              SUBMIT REQUEST
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors uppercase tracking-wide"
+            >
+              CANCEL
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RereferRequestDialog({ open, onCancel, onSubmit }: { open: boolean; onCancel: () => void; onSubmit: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  
+  const handleSubmit = () => {
+    if (reason.trim()) {
+      onSubmit(reason.trim());
+      setReason("");
+    }
+  };
+
+  const handleClose = () => {
+    setReason("");
+    onCancel();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden z-50">
+        <div className="bg-secondary px-6 py-4">
+          <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Request to Rerefer</DialogTitle>
+          <p className="text-white/70 text-[10px] mt-0.5">Please provide a reason for your rerefer request</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
+              Reason for Rerefer Request
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Enter the reason for your rerefer request..."
+              className="w-full min-h-[100px] text-xs border-2 border-gray-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary resize-none"
+            />
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!reason.trim()}
+              className="flex-1 px-4 py-2.5 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              SUBMIT REQUEST
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors uppercase tracking-wide"
+            >
+              CANCEL
+            </button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -92,6 +283,7 @@ export function ReferralCard({
   notesAndIndications,
   chartNumber,
   acceptedBy,
+  acceptedAt,
   status,
   showAccept = true,
   showUpdate = false,
@@ -104,18 +296,42 @@ export function ReferralCard({
   specialCase,
   tentativeAppointment,
   age: ageProp,
+  userId,
+  showEditOption = false,
+  editRequestReason,
+  editRequestStatus,
   onUpdate,
   onAccept,
   onApprove,
   onDecline,
   onDelete,
+  onApproveEditRequest,
+  onDeclineEditRequest,
+  onEditRequestSubmitted,
+  editRequestPage = false,
+  onCancelEditRequest,
+  acceptedReferralsPage = false,
+  referralStatus,
+  onStatusChange,
+  onRerefer,
+  rereferRequestStatus,
+  deletionRequestStatus,
+  isProfessor = false,
+  isAdvisee = false,
 }: ReferralCardProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isEditRequestOpen, setIsEditRequestOpen] = useState(false);
+  const [isCancelEditRequestOpen, setIsCancelEditRequestOpen] = useState(false);
+  const [isStatusPickerOpen, setIsStatusPickerOpen] = useState(false);
+  const [isRereferOpen, setIsRereferOpen] = useState(false);
+  const [isDeletionRequestOpen, setIsDeletionRequestOpen] = useState(false);
 
-  const referralData: Referral = {
+  // Memoize referralData to prevent recreation on every render
+  const referralData: Referral = useMemo(() => ({
     id,
+    user_id: userId || "",
     chart_number: chartNumber || "",
     treatment: treatment || null,
     age: ageProp ?? (title ? parseInt(title.match(/(\d+) yr/)?.[1] || "0") : null),
@@ -133,11 +349,63 @@ export function ReferralCard({
     status: status || "pending",
     is_featured: isFeatured || false,
     accepted_by: acceptedBy || "None",
+    accepted_at: acceptedAt || null,
+    edit_request_reason: editRequestReason || null,
+    edit_request_status: editRequestStatus || null,
+    last_edited_by: null,
+    last_edited_at: null,
+    referral_status: referralStatus || "ongoing",
+    referral_status_changed_at: null,
+    rerefer_request_reason: null,
+    rerefer_request_status: null,
+    rerefer_requested_by: null,
+    rerefer_requested_at: null,
+    rerefer_approved_by: null,
+    rerefer_approved_at: null,
+    rerefer_declined_by: null,
+    rerefer_declined_at: null,
     created_at: createdAt || new Date().toISOString(),
-  };
+  }), [id, userId, chartNumber, treatment, ageProp, medicalAlert, clinicalSectionOrigin, clinicalSectionDestination, 
+      clinicalDisciplineOrigin, clinicalDisciplineDestination, treatmentServiceOrigin, treatmentServiceDestination,
+      specialCase, tentativeAppointment, medicalHistory, notesAndIndications, status, isFeatured, acceptedBy, 
+      acceptedAt, editRequestReason, editRequestStatus, referralStatus, createdAt]);
+
+  const handleEditRequestSubmit = useCallback(async (reason: string) => {
+    try {
+      await submitEditRequest(id, reason);
+      setIsEditRequestOpen(false);
+      onEditRequestSubmitted?.();
+    } catch (error) {
+      console.error("Error submitting edit request:", error);
+      alert("Failed to submit edit request: " + (error as Error).message);
+    }
+  }, [id, onEditRequestSubmitted]);
+
+  const handleRereferSubmit = useCallback(async (reason: string) => {
+    try {
+      await submitRereferRequest(id, reason);
+      setIsRereferOpen(false);
+      onRerefer?.(id);
+      onEditRequestSubmitted?.();
+    } catch (error) {
+      console.error("Error submitting rerefer request:", error);
+      alert("Failed to submit rerefer request: " + (error as Error).message);
+    }
+  }, [id, onRerefer, onEditRequestSubmitted]);
+
+  const handleDeletionRequestSubmit = useCallback(async (reason: string) => {
+    try {
+      await submitDeletionRequest(id, reason);
+      setIsDeletionRequestOpen(false);
+      onEditRequestSubmitted?.();
+    } catch (error) {
+      console.error("Error submitting deletion request:", error);
+      alert("Failed to submit deletion request: " + (error as Error).message);
+    }
+  }, [id, onEditRequestSubmitted]);
 
   return (
-    <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-5 mb-3">
+    <div className="bg-[#87c4d8]/25 backdrop-blur-sm rounded shadow border border-[#87c4d8]/50 p-5 mb-3">
       <div className="flex justify-between items-start gap-4">
         <div className="flex-1">
           <h3 className="text-secondary font-bold text-sm mb-4 leading-tight">
@@ -181,8 +449,50 @@ export function ReferralCard({
                 <span className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4" dangerouslySetInnerHTML={{ __html: notesAndIndications }} />
               </div>
             )}
-            {chartNumber && acceptedBy && acceptedBy !== 'None' && <p><span className="font-semibold text-secondary">Chart Number:</span> {chartNumber}</p>}
-            {acceptedBy && <p><span className="font-semibold text-secondary">Accepted by:</span> {acceptedBy}</p>}
+
+            {editRequestReason && editRequestStatus === "pending" && (
+              <div className="bg-amber-50 p-3 rounded border-l-4 border-amber-500">
+                <p className="font-semibold text-amber-800 mb-1 text-xs uppercase tracking-wide">Edit Request Reason</p>
+                <p className="text-gray-700">{editRequestReason}</p>
+                {onApproveEditRequest && onDeclineEditRequest && (
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={() => onApproveEditRequest(id)}
+                      className="px-4 py-1.5 bg-success text-white text-[10px] font-bold rounded hover:bg-success/90 transition-colors uppercase tracking-wide shadow"
+                    >
+                      APPROVE EDIT
+                    </button>
+                    <button
+                      onClick={() => onDeclineEditRequest(id)}
+                      className="px-4 py-1.5 bg-red-600 text-white text-[10px] font-bold rounded hover:bg-red-700 transition-colors uppercase tracking-wide shadow"
+                    >
+                      DECLINE EDIT
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {acceptedBy && acceptedBy !== 'None' && (
+              <div className="bg-secondary/5 p-3 rounded-lg border border-secondary/20">
+                <p className="font-bold text-secondary text-[10px] uppercase tracking-wide mb-2">Acceptance Details</p>
+                {chartNumber && (
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Chart No.</span>
+                    <span className="text-xs font-bold text-secondary">{chartNumber}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Accepted by</span>
+                  <span className="text-xs font-semibold text-gray-800">{acceptedBy}</span>
+                </div>
+                {acceptedAt && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Accepted on</span>
+                    <span className="text-xs text-gray-600">{new Date(acceptedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -212,8 +522,8 @@ export function ReferralCard({
               )}
             </div>
             
-            {/* Status Badge - Show based on referral status */}
-            {!showUpdate && acceptedBy && acceptedBy !== 'None' && (
+            {/* Status Badge - Show based on referral status (hide on accepted referrals page and edit request page) */}
+            {!showUpdate && !acceptedReferralsPage && !editRequestPage && acceptedBy && acceptedBy !== 'None' && (
               <>
                 {status === 'pending' && (
                   <div className="bg-orange-100 border-2 border-orange-500 text-orange-800 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
@@ -239,6 +549,65 @@ export function ReferralCard({
             </Button>
           )}
           
+          {/* Edit Request Status Badge */}
+          {editRequestPage && editRequestStatus && (
+            <>
+              {editRequestStatus === "approved" && (
+                <div className="bg-green-100 border-2 border-success text-success px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
+                  APPROVED
+                </div>
+              )}
+              {editRequestStatus === "declined" && (
+                <div className="bg-red-100 border-2 border-red-500 text-red-600 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
+                  DECLINED
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Accepted Referral Status Badge */}
+          {/* Pending Rerefer Badge */}
+          {acceptedReferralsPage && rereferRequestStatus === "pending" && (
+            <div className="bg-amber-100 border-2 border-amber-500 text-amber-700 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
+              PENDING REREFER
+            </div>
+          )}
+          {referralStatus && (acceptedReferralsPage || (acceptedBy && acceptedBy !== "None")) && (
+            <div className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 ${
+              referralStatus === "ongoing"
+                ? "bg-blue-100 border-blue-500 text-blue-700"
+                : referralStatus === "completed"
+                ? "bg-green-100 border-green-500 text-green-700"
+                : referralStatus === "deferred"
+                ? "bg-red-100 border-red-500 text-red-700"
+                : referralStatus === "blacklisted"
+                ? "bg-gray-800 border-gray-900 text-white"
+                : "bg-blue-100 border-blue-500 text-blue-700"
+            }`}>
+              {referralStatus}
+            </div>
+          )}
+
+          {/* Pending Request Badges — professor "All Referrals" tab (only for advisees) */}
+          {showUpdate && editRequestStatus === "pending" && editRequestReason && (!isProfessor || isAdvisee) && (
+            <div className="relative px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 bg-amber-50 border-amber-500 text-amber-700">
+              <span className="absolute -top-1.5 -right-1.5 inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              Pending Edit
+            </div>
+          )}
+          {showUpdate && rereferRequestStatus === "pending" && (!isProfessor || isAdvisee) && (
+            <div className="relative px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 bg-purple-50 border-purple-500 text-purple-700">
+              <span className="absolute -top-1.5 -right-1.5 inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              Pending Rerefer
+            </div>
+          )}
+          {showUpdate && deletionRequestStatus === "pending" && (!isProfessor || isAdvisee) && (
+            <div className="relative px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 bg-red-50 border-red-500 text-red-700">
+              <span className="absolute -top-1.5 -right-1.5 inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              Pending Deletion
+            </div>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -247,17 +616,86 @@ export function ReferralCard({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="bg-white border-2 border-gray-300 shadow-lg rounded">
               <DropdownMenuItem onClick={() => setIsDetailsOpen(true)}>View Details</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
-              <DropdownMenuItem 
-                className="text-red-600"
-                onClick={() => setIsDeleteConfirmOpen(true)}
-              >
-                Delete
-              </DropdownMenuItem>
+              {acceptedReferralsPage ? (
+                <>
+                  <DropdownMenuItem
+                    className="text-blue-600 font-semibold"
+                    onClick={() => setIsStatusPickerOpen(true)}
+                  >
+                    Edit Status
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-amber-600 font-semibold cursor-pointer"
+                    onClick={() => setIsRereferOpen(true)}
+                  >
+                    Re-refer
+                  </DropdownMenuItem>
+                </>
+              ) : editRequestPage ? (
+                <>
+                  {editRequestStatus === "approved" && (
+                    <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
+                  )}
+                  {editRequestStatus === "declined" && (
+                    <DropdownMenuItem
+                      className="text-blue-600"
+                      onClick={() => setIsEditRequestOpen(true)}
+                    >
+                      Request to Edit
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    className="text-red-600"
+                    onClick={() => setIsCancelEditRequestOpen(true)}
+                  >
+                    Cancel Request
+                  </DropdownMenuItem>
+                </>
+              ) : isProfessor ? (
+                <>
+                  <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-red-600"
+                    onClick={() => setIsDeleteConfirmOpen(true)}
+                  >
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                userId === getCurrentUserId() && (
+                  <>
+                    {showEditOption && (
+                      <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      className="text-blue-600"
+                      onClick={() => setIsEditRequestOpen(true)}
+                    >
+                      Request to Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className="text-red-600"
+                      onClick={() => setIsDeletionRequestOpen(true)}
+                    >
+                      Request to Delete
+                    </DropdownMenuItem>
+                  </>
+                )
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
+      <EditRequestDialog
+        open={isEditRequestOpen}
+        onCancel={() => setIsEditRequestOpen(false)}
+        onSubmit={handleEditRequestSubmit}
+      />
+      <RereferRequestDialog
+        open={isRereferOpen}
+        onCancel={() => setIsRereferOpen(false)}
+        onSubmit={handleRereferSubmit}
+      />
       <DeleteConfirmDialog
         open={isDeleteConfirmOpen}
         onCancel={() => setIsDeleteConfirmOpen(false)}
@@ -265,6 +703,95 @@ export function ReferralCard({
       />
       <ViewDetailsModal referral={referralData} isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} />
       <EditReferralModal referral={referralData} isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSave={(id, updates) => { onUpdate?.(id, updates); setIsEditOpen(false); }} />
+      <DeleteRequestDialog open={isDeletionRequestOpen} onCancel={() => setIsDeletionRequestOpen(false)} onSubmit={handleDeletionRequestSubmit} />
+
+      {/* Cancel Edit Request Confirmation Dialog — portaled to body */}
+      {isCancelEditRequestOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/20"
+            onClick={() => setIsCancelEditRequestOpen(false)}
+          />
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Cancel Edit Request</h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                Are you sure you want to cancel this edit request? The referral will be removed from your edit requests.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setIsCancelEditRequestOpen(false); onCancelEditRequest?.(id); }}
+                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded hover:bg-red-700 transition-colors shadow uppercase tracking-wide"
+                >
+                  YES, CANCEL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCancelEditRequestOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
+                >
+                  GO BACK
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Status Picker Dialog */}
+      {isStatusPickerOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/20"
+            onClick={() => setIsStatusPickerOpen(false)}
+          />
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-sm mx-4 p-6">
+            <div className="text-center">
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Edit Status</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Select a status for this referral
+              </p>
+              <div className="space-y-2 mb-6">
+                {[
+                  { value: "ongoing", label: "ONGOING", className: "bg-blue-100 border-blue-500 text-blue-700 hover:bg-blue-200" },
+                  { value: "completed", label: "COMPLETED", className: "bg-green-100 border-green-500 text-green-700 hover:bg-green-200" },
+                  { value: "deferred", label: "DEFERRED", className: "bg-red-100 border-red-500 text-red-700 hover:bg-red-200" },
+                  { value: "blacklisted", label: "BLACKLISTED", className: "bg-gray-800 border-gray-900 text-white hover:bg-gray-700" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      onStatusChange?.(id, option.value);
+                      setIsStatusPickerOpen(false);
+                    }}
+                    className={`w-full px-4 py-3 rounded border-2 text-xs font-bold uppercase tracking-wide transition-colors ${option.className} ${
+                      referralStatus === option.value ? "ring-2 ring-offset-2 ring-gray-400" : ""
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStatusPickerOpen(false)}
+                className="w-full px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
+              >
+                CANCEL
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -282,6 +809,7 @@ interface FeaturedReferralCardProps {
   notesAndIndications?: string;
   chartNumber?: string;
   acceptedBy?: string;
+  acceptedAt?: string | null;
   status?: string;
   createdAt?: string;
   treatment?: string;
@@ -290,13 +818,20 @@ interface FeaturedReferralCardProps {
   specialCase?: string;
   tentativeAppointment?: string;
   age?: number;
+  userId?: string;
+  showEditOption?: boolean;
+  editRequestReason?: string | null;
+  editRequestStatus?: string | null;
   initiallyReferredBy?: string;
   approvedBy?: string;
   currentlyReferredBy?: string;
   currentApprovedBy?: string;
-  onAccept?: () => void;
+  onAccept?: (id: string) => void;
   onUpdate?: (id: string, updates: Partial<Referral>) => void;
   onDelete?: (id: string) => void;
+  onApproveEditRequest?: (id: string) => void;
+  onDeclineEditRequest?: (id: string) => void;
+  onEditRequestSubmitted?: () => void;
 }
 
 export function FeaturedReferralCard({
@@ -312,6 +847,7 @@ export function FeaturedReferralCard({
   notesAndIndications,
   chartNumber,
   acceptedBy,
+  acceptedAt,
   status,
   createdAt,
   treatment,
@@ -324,16 +860,37 @@ export function FeaturedReferralCard({
   approvedBy,
   currentlyReferredBy,
   currentApprovedBy,
+  userId,
+  showEditOption = false,
+  editRequestReason,
+  editRequestStatus,
   onAccept,
   onUpdate,
   onDelete,
+  onApproveEditRequest,
+  onDeclineEditRequest,
+  onEditRequestSubmitted,
 }: FeaturedReferralCardProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isEditRequestOpen, setIsEditRequestOpen] = useState(false);
+  const [isDeletionRequestOpen, setIsDeletionRequestOpen] = useState(false);
+
+  const handleDeletionRequestSubmit = async (reason: string) => {
+    try {
+      await submitDeletionRequest(id, reason);
+      setIsDeletionRequestOpen(false);
+      onEditRequestSubmitted?.();
+    } catch (error) {
+      console.error("Error submitting deletion request:", error);
+      alert("Failed to submit deletion request: " + (error as Error).message);
+    }
+  };
 
   const referralData: Referral = {
     id,
+    user_id: userId || "",
     chart_number: chartNumber || "",
     treatment: treatment || null,
     age: agePropFeatured ?? (title ? parseInt(title.match(/(\d+) yr/)?.[1] || "0") : null),
@@ -351,11 +908,29 @@ export function FeaturedReferralCard({
     status: status || "pending",
     is_featured: isFeatured || false,
     accepted_by: acceptedBy || "None",
+    accepted_at: acceptedAt || null,
+    edit_request_reason: editRequestReason || null,
+    edit_request_status: editRequestStatus || null,
+    last_edited_by: null,
+    last_edited_at: null,
+    referral_status: "ongoing",
+    referral_status_changed_at: null,
     created_at: createdAt || new Date().toISOString(),
   };
 
+  const handleEditRequestSubmit = async (reason: string) => {
+    try {
+      await submitEditRequest(id, reason);
+      setIsEditRequestOpen(false);
+      onEditRequestSubmitted?.();
+    } catch (error) {
+      console.error("Error submitting edit request:", error);
+      alert("Failed to submit edit request: " + (error as Error).message);
+    }
+  };
+
   return (
-    <div className="bg-white/60 backdrop-blur-sm rounded border-2 border-gray-300 p-4 shadow relative">
+    <div className="bg-[#87c4d8]/25 backdrop-blur-sm rounded border-2 border-[#87c4d8]/50 p-4 shadow relative">
       {/* Dropdown Menu */}
       <div className="absolute top-3 right-3">
         <DropdownMenu>
@@ -366,13 +941,25 @@ export function FeaturedReferralCard({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="bg-white border-2 border-gray-300 shadow-lg rounded">
             <DropdownMenuItem onClick={() => setIsDetailsOpen(true)}>View Details</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
-            <DropdownMenuItem 
-              className="text-red-600"
-              onClick={() => setIsDeleteConfirmOpen(true)}
-            >
-              Delete
-            </DropdownMenuItem>
+            {userId === getCurrentUserId() && (
+              <>
+                {showEditOption && (
+                  <DropdownMenuItem onClick={() => setIsEditOpen(true)}>Edit</DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  className="text-blue-600"
+                  onClick={() => setIsEditRequestOpen(true)}
+                >
+                  Request to Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-red-600"
+                  onClick={() => setIsDeletionRequestOpen(true)}
+                >
+                  Request to Delete
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -418,8 +1005,26 @@ export function FeaturedReferralCard({
             <span className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4" dangerouslySetInnerHTML={{ __html: notesAndIndications }} />
           </div>
         )}
-        {chartNumber && acceptedBy && acceptedBy !== 'None' && (
-          <p><span className="font-semibold text-secondary">Chart:</span> {chartNumber}</p>
+        {acceptedBy && acceptedBy !== 'None' && (
+          <div className="bg-secondary/5 p-3 rounded-lg border border-secondary/20">
+            <p className="font-bold text-secondary text-[10px] uppercase tracking-wide mb-2">Acceptance Details</p>
+            {chartNumber && (
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Chart No.</span>
+                <span className="text-xs font-bold text-secondary">{chartNumber}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Accepted by</span>
+              <span className="text-xs font-semibold text-gray-800">{acceptedBy}</span>
+            </div>
+            {acceptedAt && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Accepted on</span>
+                <span className="text-xs text-gray-600">{new Date(acceptedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+              </div>
+            )}
+          </div>
         )}
         {initiallyReferredBy && (
           <p><span className="font-semibold text-secondary">Initially Referred By:</span> {initiallyReferredBy}</p>
@@ -436,12 +1041,17 @@ export function FeaturedReferralCard({
       </div>
       {onAccept && (
         <button
-          onClick={onAccept}
+          onClick={() => onAccept(id)}
           className="w-full mt-4 bg-secondary text-white text-xs font-bold py-2.5 px-6 rounded hover:bg-secondary/90 transition-colors shadow uppercase tracking-wide"
         >
           ACCEPT
         </button>
       )}
+      <EditRequestDialog
+        open={isEditRequestOpen}
+        onCancel={() => setIsEditRequestOpen(false)}
+        onSubmit={handleEditRequestSubmit}
+      />
       <DeleteConfirmDialog
         open={isDeleteConfirmOpen}
         onCancel={() => setIsDeleteConfirmOpen(false)}
@@ -449,6 +1059,11 @@ export function FeaturedReferralCard({
       />
       <ViewDetailsModal referral={referralData} isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} />
       <EditReferralModal referral={referralData} isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} onSave={(id, updates) => { onUpdate?.(id, updates); setIsEditOpen(false); }} />
+      <DeleteRequestDialog open={isDeletionRequestOpen} onCancel={() => setIsDeletionRequestOpen(false)} onSubmit={handleDeletionRequestSubmit} />
     </div>
   );
 }
+
+// Memoized versions for performance optimization
+export const MemoizedReferralCard = memo(ReferralCard);
+export const MemoizedFeaturedReferralCard = memo(FeaturedReferralCard);

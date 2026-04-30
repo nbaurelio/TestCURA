@@ -404,14 +404,41 @@ export function NewPatientReferralModal({
           </div>
 
           {/* Appointment */}
-          <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 border border-gray-200">
+          <div>
             <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Tentative Appointment</label>
-            <Input
-              className="h-8 text-xs border-gray-300 focus:ring-secondary"
-              type="datetime-local"
-              value={formData.tentative_appointment_schedule}
-              onChange={(e) => handleChange("tentative_appointment_schedule", e.target.value)}
-            />
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                className="w-full sm:flex-1 h-9 text-xs border-2 border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary font-medium"
+                type="date"
+                value={formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[0] : ''}
+                onChange={(e) => {
+                  const date = e.target.value;
+                  const time = formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[1] : '06:00';
+                  handleChange("tentative_appointment_schedule", `${date}T${time}`);
+                }}
+              />
+              <select
+                className="w-28 h-9 text-xs border-2 border-secondary rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-secondary font-bold text-white cursor-pointer hover:bg-secondary/90 transition-colors [&>option]:bg-white [&>option]:text-gray-700 [&>option]:font-semibold"
+                value={formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[1]?.substring(0, 5) : '06:00'}
+                onChange={(e) => {
+                  const date = formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[0] : new Date().toISOString().split('T')[0];
+                  handleChange("tentative_appointment_schedule", `${date}T${e.target.value}`);
+                }}
+              >
+                {Array.from({ length: 25 }, (_, i) => {
+                  const hour = Math.floor(i / 2) + 6;
+                  const minute = i % 2 === 0 ? '00' : '30';
+                  const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+                  const period = hour >= 12 ? 'pm' : 'am';
+                  const value = `${String(hour).padStart(2, '0')}:${minute}`;
+                  return (
+                    <option key={value} value={value}>
+                      {displayHour}:{minute}{period}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
           </div>
 
           {/* Notes */}

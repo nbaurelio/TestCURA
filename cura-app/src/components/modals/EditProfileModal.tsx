@@ -216,11 +216,11 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
             </button>
           </div>
           <div className="flex gap-2 mt-3">
-            <button type="button" onClick={() => setCropSrc(null)} className="flex-1 py-2 text-xs font-bold border-2 border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
-              CANCEL
-            </button>
             <button type="button" onClick={handleCropConfirm} className="flex-1 py-2 text-xs font-bold bg-secondary text-white rounded-lg hover:bg-secondary/90 transition-colors">
               USE PHOTO
+            </button>
+            <button type="button" onClick={() => setCropSrc(null)} className="flex-1 py-2 text-xs font-bold border-2 border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+              CANCEL
             </button>
           </div>
         </div>
