@@ -74,6 +74,32 @@
   100% { transform: scale(2.5); opacity: 0; }
 }
 
+/* Component entrance animations */
+.animate-enter {
+  animation: fadeInUp 0.4s ease-out both;
+}
+.animate-enter-delay-1 {
+  animation: fadeInUp 0.4s ease-out 0.08s both;
+}
+.animate-enter-delay-2 {
+  animation: fadeInUp 0.4s ease-out 0.16s both;
+}
+.animate-enter-delay-3 {
+  animation: fadeInUp 0.4s ease-out 0.24s both;
+}
+.animate-enter-delay-4 {
+  animation: fadeInUp 0.4s ease-out 0.32s both;
+}
+.animate-enter-fade {
+  animation: fadeIn 0.4s ease-out both;
+}
+.animate-enter-fade-delay-1 {
+  animation: fadeIn 0.4s ease-out 0.1s both;
+}
+.animate-enter-fade-delay-2 {
+  animation: fadeIn 0.4s ease-out 0.2s both;
+}
+
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   20% { transform: translateX(-6px); }

@@ -24,6 +24,13 @@ export default function LoginPage() {
     "juan@example.com": "11111111-1111-1111-1111-111111111111",
     "prof1@example.com": "22222222-2222-2222-2222-222222222222",
     "prof2@example.com": "33333333-3333-3333-3333-333333333333",
+    "carlos@example.com": "aaaa1111-1111-1111-1111-111111111111",
+    "maria.c@example.com": "aaaa2222-2222-2222-2222-222222222222",
+    "jose@example.com": "aaaa3333-3333-3333-3333-333333333333",
+    "anna@example.com": "bbbb1111-1111-1111-1111-111111111111",
+    "miguel@example.com": "bbbb2222-2222-2222-2222-222222222222",
+    "sarah@example.com": "bbbb3333-3333-3333-3333-333333333333",
+    "admin@example.com": "cccc0000-0000-0000-0000-000000000000",
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -38,7 +45,7 @@ export default function LoginPage() {
     // Match email to a test account
     const userId = TEST_ACCOUNTS[email.toLowerCase()];
     if (!userId) {
-      setError("Account not found. Try test@example.com, juan@example.com, prof1@example.com, or prof2@example.com");
+      setError("Account not found. Try test@example.com, juan@example.com, prof1@example.com, prof2@example.com, carlos@example.com, maria.c@example.com, or jose@example.com");
       return;
     }
 
@@ -66,7 +73,9 @@ export default function LoginPage() {
 
     // Wait for animation, then redirect
     setTimeout(() => {
-      if (profile.role === "professor") {
+      if (profile.role === "clinical_admin") {
+        router.replace("/clinical-admin");
+      } else if (profile.role === "professor") {
         router.replace("/professor");
       } else {
         router.replace("/home");
@@ -76,36 +85,29 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-      {/* Background Image */}
+      {/* Background image */}
       <div
-        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-transform duration-[2000ms] ease-in-out"
-        style={{
-          backgroundImage: "url(/oble.png)",
-          transform: isTransitioning ? "scale(1.1)" : "scale(1)",
-        }}
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/cura-wallpaper.png)" }}
       />
-
-      {/* White overlay — fades to solid on transition */}
-      <div
-        className="fixed inset-0 z-0 transition-all duration-[2000ms] ease-in-out"
-        style={{
-          backgroundColor: isTransitioning ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.5)",
-        }}
-      />
+      {/* Teal overlay */}
+      <div className="fixed inset-0 z-0" style={{ backgroundColor: "rgba(135,196,216,0.7)" }} />
 
       {/* Transition overlay — logo zoom + welcome */}
       {isTransitioning && (
         <div className="fixed inset-0 z-30 flex flex-col items-center justify-center animate-[fadeIn_0.3s_ease-out]">
-          <div className="animate-[logoZoom_2s_ease-in-out_forwards]">
+          <div className="absolute inset-0 bg-cover bg-center bg-no-repeat" style={{ backgroundImage: "url(/cura-wallpaper.png)" }} />
+          <div className="absolute inset-0" style={{ backgroundColor: "rgba(135,196,216,0.85)" }} />
+          <div className="relative z-10 animate-[logoZoom_2s_ease-in-out_forwards]">
             <Image
-              src="/CURA_Full.png"
+              src="/CURA_Full_WhiteTooth.png"
               alt="CURA Logo"
               width={200}
               height={68}
               className="object-contain drop-shadow-2xl"
             />
           </div>
-          <p className="text-secondary font-bold text-sm uppercase tracking-widest mt-5 animate-[fadeInOut_2s_ease-in-out_forwards]">
+          <p className="relative z-10 text-white font-bold text-sm uppercase tracking-widest mt-5 animate-[fadeInOut_2s_ease-in-out_forwards]">
             Welcome, {welcomeName}
           </p>
         </div>
@@ -113,7 +115,7 @@ export default function LoginPage() {
 
       {/* Content */}
       <div
-        className="relative z-10 w-full max-w-[300px] mx-auto px-2 transition-all duration-[1200ms] ease-in-out"
+        className="relative z-10 w-full max-w-[300px] mx-auto px-2 -mt-32 transition-all duration-[1200ms] ease-in-out"
         style={{
           opacity: isTransitioning ? 0 : 1,
           transform: isTransitioning ? "scale(0.95) translateY(-20px)" : "scale(1) translateY(0)",
@@ -121,9 +123,9 @@ export default function LoginPage() {
       >
 
         {/* CURA Logo */}
-        <div className="flex justify-center mb-5 animate-[fadeInDown_0.6s_ease-out]">
+        <div className="flex justify-center mb-1 animate-[fadeInDown_0.6s_ease-out]">
           <Image
-            src="/CURA_Full.png"
+            src="/CURA_Full_WhiteTooth.png"
             alt="CURA Logo"
             width={200}
             height={68}
@@ -133,7 +135,7 @@ export default function LoginPage() {
         </div>
 
         {/* Login Card */}
-        <div className="bg-white/60 backdrop-blur-sm rounded shadow border-2 border-gray-300 animate-[fadeInUp_0.6s_ease-out_0.2s_both]">
+        <div className="bg-white/85 backdrop-blur-md rounded-lg shadow-xl border border-white/50 animate-[fadeInUp_0.6s_ease-out_0.2s_both]">
 
           {/* Card Header */}
           <div className="bg-secondary rounded-t px-4 py-3">
@@ -149,7 +151,7 @@ export default function LoginPage() {
             )}
 
             {/* Email Address */}
-            <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-200">
+            <div className="p-2.5">
               <label htmlFor="email" className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
                 Email Address
               </label>
@@ -165,7 +167,7 @@ export default function LoginPage() {
             </div>
 
             {/* Password */}
-            <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-200">
+            <div className="p-2.5">
               <label htmlFor="password" className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
                 Password
               </label>
@@ -194,11 +196,32 @@ export default function LoginPage() {
         </div>
 
         {/* Footer tagline */}
-        <p className="text-center text-[10px] text-gray-500 font-medium uppercase tracking-wide mt-4 animate-[fadeIn_0.6s_ease-out_0.4s_both]">
+        <p className="text-center text-[10px] text-secondary font-medium uppercase tracking-wide mt-4 animate-[fadeIn_0.6s_ease-out_0.4s_both]">
           Centralized University Referral Application
         </p>
 
       </div>
+
+      {/* UP Seal — lower left corner */}
+      {!isTransitioning && (
+        <div className="fixed bottom-4 left-4 z-20 flex items-center gap-2 animate-[fadeIn_0.6s_ease-out_0.4s_both]">
+          <Image
+            src="/upcd_logo.png"
+            alt="UPCD Logo"
+            width={60}
+            height={60}
+            className="object-contain"
+          />
+          <Image
+            src="/up-seal.png"
+            alt="University of the Philippines Seal"
+            width={60}
+            height={60}
+            className="object-contain"
+          />
+          <p className="text-[9px] text-secondary/70 font-medium">© 2026 All Rights Reserved</p>
+        </div>
+      )}
     </div>
   );
 }

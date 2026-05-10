@@ -76,7 +76,7 @@ export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDet
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 pb-6">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -84,7 +84,7 @@ export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDet
       />
 
       {/* Modal */}
-      <div className="relative bg-white max-w-[380px] w-[92vw] sm:w-full rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto">
+      <div className="relative bg-white max-w-[380px] w-full rounded-xl overflow-hidden shadow-xl max-h-[80vh] overflow-y-auto">
         {/* Header */}
         <div className="bg-secondary p-3 sm:p-4 flex items-center justify-between sticky top-0 z-10">
           <h2 className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">

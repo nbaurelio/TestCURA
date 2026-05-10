@@ -7,6 +7,9 @@ import { Footer } from "@/components/layout/Footer";
 import { ProfileCard } from "@/components/sidebar/ProfileCard";
 import { AcceptedReferralsButton } from "@/components/sidebar/AcceptedReferralsButton";
 import { EditRequestsButton } from "@/components/sidebar/EditRequestsButton";
+import { DeletionRequestsButton } from "@/components/sidebar/DeletionRequestsButton";
+import { ArchivedReferralsButton } from "@/components/sidebar/ArchivedReferralsButton";
+import { RequestStatusButton } from "@/components/sidebar/RequestStatusButton";
 import { SchedulePlanner } from "@/components/sidebar/SchedulePlanner";
 import { ReferralCard, MemoizedReferralCard, MemoizedFeaturedReferralCard } from "@/components/referrals/ReferralCard";
 import { CreateReferralModal } from "@/components/modals/CreateReferralModal";
@@ -14,11 +17,13 @@ import { NewPatientReferralModal } from "@/components/modals/NewPatientReferralM
 import { ExistingPatientReferralModal } from "@/components/modals/ExistingPatientReferralModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { getReferrals, deleteReferral, acceptReferral, updateReferral, fixStaleAcceptedBy, Referral } from "@/lib/api/referrals";
+import { getReferrals, deleteReferral, acceptReferral, updateReferral, Referral } from "@/lib/api/referrals";
+import { createEvent, clearEventsCache } from "@/lib/api/events";
 import { getMockUserProfile, getCurrentUserId, getProfile } from "@/lib/api/profiles";
 import { supabase } from "@/lib/supabase";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { filterTaxonomy, ClinicalSection, ClinicalDiscipline, TreatmentService } from "@/lib/data/filterTaxonomy";
+import { sendSystemNotification, requestNotificationPermission } from "@/lib/utils/notify";
 
 
 export default function HomePage() {
@@ -34,15 +39,19 @@ export default function HomePage() {
   const [featuredReferrals, setFeaturedReferrals] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileRefreshTrigger, setProfileRefreshTrigger] = useState(0);
+  const [plannerRefreshKey, setPlannerRefreshKey] = useState(0);
   const [currentUserName, setCurrentUserName] = useState<string>("Unknown User");
   const [acceptedReferralIds, setAcceptedReferralIds] = useState<Set<string>>(new Set());
+  const [sendBackMap, setSendBackMap] = useState<Map<string, string>>(new Map());
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getProfile(getCurrentUserId()).then((p) => {
       if (p) {
         const fullName = `${p.first_name} ${p.last_name}`.trim();
         setCurrentUserName(fullName);
-        fixStaleAcceptedBy(fullName).catch(() => {});
       }
     }).catch(() => {});
 
@@ -72,7 +81,6 @@ export default function HomePage() {
   const [selectedSection, setSelectedSection] = useState<string>("");
   const [selectedDiscipline, setSelectedDiscipline] = useState<string>("");
   const [selectedTreatment, setSelectedTreatment] = useState<string>("");
-  const [specialCaseFilter, setSpecialCaseFilter] = useState<string>("");
   const [isSectionOpen, setIsSectionOpen] = useState(false);
   const [isDisciplineOpen, setIsDisciplineOpen] = useState(false);
   const [isTreatmentOpen, setIsTreatmentOpen] = useState(false);
@@ -85,6 +93,7 @@ export default function HomePage() {
       if (sectionRef.current && !sectionRef.current.contains(e.target as Node)) setIsSectionOpen(false);
       if (disciplineRef.current && !disciplineRef.current.contains(e.target as Node)) setIsDisciplineOpen(false);
       if (treatmentRef.current && !treatmentRef.current.contains(e.target as Node)) setIsTreatmentOpen(false);
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setIsSortOpen(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -95,16 +104,46 @@ export default function HomePage() {
   // Counts for sidebar badges
   const currentUserId = getCurrentUserId();
   const acceptedCount = useMemo(() => 
-    referrals.filter(r => r.is_featured && r.accepted_by && r.accepted_by !== "None" && acceptedReferralIds.has(r.id) && (r.status === "pending" || r.status === "approved")).length,
-    [referrals, acceptedReferralIds]
+    referrals.filter(r =>
+      r.is_featured &&
+      r.accepted_by && r.accepted_by !== "None" &&
+      (acceptedReferralIds.has(r.id) || r.accepted_by_user_id === currentUserId) &&
+      (r.status === "pending" || r.status === "approved") &&
+      !["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() ?? "")
+    ).length,
+    [referrals, acceptedReferralIds, currentUserId]
   );
   const editRequestCount = useMemo(() => 
-    referrals.filter(r => r.user_id === currentUserId && r.edit_request_status && (r.edit_request_status === "approved" || r.edit_request_status === "declined")).length,
+    referrals.filter(r => r.user_id === currentUserId && r.edit_request_status && (r.edit_request_status === "pending" || r.edit_request_status === "approved" || r.edit_request_status === "declined")).length,
     [referrals, currentUserId]
+  );
+  const deletionRequestCount = useMemo(() =>
+    referrals.filter(r => r.user_id === currentUserId && r.deletion_request_status && (r.deletion_request_status === "pending" || r.deletion_request_status === "approved" || r.deletion_request_status === "declined")).length,
+    [referrals, currentUserId]
+  );
+  const requestStatusCount = useMemo(() =>
+    referrals.filter(r =>
+      r.user_id === currentUserId && (
+        (r.edit_request_status === "pending") ||
+        ((r as any).deletion_request_status === "pending") ||
+        !!(r as any).status_change_reason
+      )
+    ).length,
+    [referrals, currentUserId]
+  );
+  const completedCount = useMemo(() =>
+    referrals.filter(r =>
+      r.is_featured &&
+      r.accepted_by && r.accepted_by !== "None" &&
+      acceptedReferralIds.has(r.id) &&
+      r.referral_status && ["completed", "deferred", "blacklisted"].includes(r.referral_status.toLowerCase())
+    ).length,
+    [referrals, acceptedReferralIds]
   );
 
   useEffect(() => {
     loadReferrals();
+    requestNotificationPermission();
   }, []);
 
   // Auto-play featured referrals carousel
@@ -113,7 +152,7 @@ export default function HomePage() {
 
     const interval = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % featuredReferrals.length);
-    }, 5000); // Change slide every 5 seconds
+    }, 120000); // Change slide every 2 minutes
 
     return () => clearInterval(interval);
   }, [featuredReferrals.length]);
@@ -121,19 +160,41 @@ export default function HomePage() {
   const loadReferrals = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await getReferrals();
+      const data = await getReferrals(false);
       setReferrals(data || []);
       setFilteredReferrals(data || []);
-      
-      // Get random non-accepted referrals for featured carousel
-      const nonAccepted = (data || []).filter(r => r.accepted_by === 'None');
-      // Shuffle and take up to 3 random referrals using Fisher-Yates for better performance
-      const shuffled = nonAccepted.length > 0 ? [...nonAccepted] : [];
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+
+      // Fetch latest SEND_BACK_TO_SYSTEM events to override posted-at for re-posted referrals
+      const activityLogsTable = supabase.from("activity_logs") as any;
+      const { data: sendBackLogs } = await activityLogsTable
+        .select("created_at, metadata")
+        .eq("action", "SEND_BACK_TO_SYSTEM")
+        .order("created_at", { ascending: false })
+        .limit(10000);
+      const sbMap = new Map<string, string>();
+      for (const log of (sendBackLogs || [])) {
+        try {
+          const meta = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
+          const rid = meta?.referral_id;
+          if (rid && !sbMap.has(rid)) sbMap.set(rid, log.created_at); // first encounter = latest (DESC)
+        } catch {}
       }
-      setFeaturedReferrals(shuffled.slice(0, 3));
+      setSendBackMap(sbMap);
+
+      const effectivePostedAt = (r: Referral): string => sbMap.get(r.id) ?? r.created_at;
+
+      // Get overdue referrals: not accepted and posted (effectively) more than 7 days ago
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const overdue = (data || []).filter(r =>
+        r.accepted_by === 'None' &&
+        r.created_at &&
+        new Date(effectivePostedAt(r)) < sevenDaysAgo
+      );
+      // Sort by oldest first (most overdue)
+      overdue.sort((a, b) => new Date(effectivePostedAt(a)).getTime() - new Date(effectivePostedAt(b)).getTime());
+      setFeaturedReferrals(overdue.slice(0, 10));
+      // Reset slide only if current slide is out of bounds
+      setCurrentSlide(prev => (overdue.length > 0 ? Math.min(prev, overdue.length - 1) : 0));
     } catch (error) {
       console.error("Error loading referrals:", error);
     } finally {
@@ -184,20 +245,15 @@ export default function HomePage() {
   // Apply filters
   const handleSearch = () => {
     setIsAdvancedFilterActive(true);
-    // Start with only non-accepted referrals
+    // Base pool: only non-accepted referrals, matched against DESTINATION fields only
     let filtered = referrals.filter(r => r.accepted_by === 'None');
-    
-    console.log('Starting filter with non-accepted referrals:', filtered.length);
 
     if (selectedSection) {
       const section = filterTaxonomy.find(s => s.id === selectedSection);
       if (section) {
-        console.log('Filtering by section:', section.shortName);
-        filtered = filtered.filter(r => {
-          console.log('Referral section destination:', r.clinical_section_destination);
-          return r.clinical_section_destination === section.shortName;
-        });
-        console.log('After section filter:', filtered.length);
+        filtered = filtered.filter(r =>
+          r.clinical_section_destination === section.shortName
+        );
       }
     }
 
@@ -205,12 +261,9 @@ export default function HomePage() {
       const section = filterTaxonomy.find(s => s.id === selectedSection);
       const discipline = section?.clinicalDisciplines.find(d => d.id === selectedDiscipline);
       if (discipline) {
-        console.log('Filtering by discipline:', discipline.name);
-        filtered = filtered.filter(r => {
-          console.log('Referral discipline destination:', r.clinical_discipline_destination);
-          return r.clinical_discipline_destination === discipline.name;
-        });
-        console.log('After discipline filter:', filtered.length);
+        filtered = filtered.filter(r =>
+          r.clinical_discipline_destination === discipline.name
+        );
       }
     }
 
@@ -219,21 +272,12 @@ export default function HomePage() {
       const discipline = section?.clinicalDisciplines.find(d => d.id === selectedDiscipline);
       const treatment = discipline?.treatmentServices.find(t => t.id === selectedTreatment);
       if (treatment) {
-        console.log('Filtering by treatment:', treatment.name);
-        filtered = filtered.filter(r => {
-          console.log('Referral treatment destination:', r.treatment_service_destination);
-          return r.treatment_service_destination === treatment.name;
-        });
-        console.log('After treatment filter:', filtered.length);
+        filtered = filtered.filter(r =>
+          r.treatment_service_destination === treatment.name
+        );
       }
     }
 
-    if (specialCaseFilter.trim()) {
-      const q = specialCaseFilter.toLowerCase().trim();
-      filtered = filtered.filter(r => r.special_case?.toLowerCase().includes(q));
-    }
-
-    console.log('Final filtered referrals:', filtered.length);
     setFilteredReferrals(filtered);
   };
 
@@ -242,7 +286,6 @@ export default function HomePage() {
     setSelectedSection("");
     setSelectedDiscipline("");
     setSelectedTreatment("");
-    setSpecialCaseFilter("");
     setIsAdvancedFilterActive(false);
     setFilteredReferrals(referrals);
   };
@@ -275,10 +318,8 @@ export default function HomePage() {
             referral.clinical_discipline_destination?.toLowerCase().includes(lowerQuery) ||
             referral.treatment_service_destination?.toLowerCase().includes(lowerQuery)
           );
-        case 'medical_history':
-          return referral.medical_history?.toLowerCase().includes(lowerQuery);
-        case 'approved_by':
-          return referral.accepted_by?.toLowerCase().includes(lowerQuery);
+        case 'age':
+          return referral.age?.toString().includes(lowerQuery);
         default:
           return false;
       }
@@ -289,6 +330,7 @@ export default function HomePage() {
 
   const handleReferralSaved = () => {
     loadReferrals();
+    sendSystemNotification("📋 Referral Posted", "Your referral has been successfully posted on the homepage.");
   };
 
   const handleDeleteReferral = useCallback((id: string) => {
@@ -304,6 +346,7 @@ export default function HomePage() {
       setIsDeleteConfirmOpen(false);
       setReferralToDelete(null);
       loadReferrals();
+      sendSystemNotification("🗑️ Referral Deleted", "The referral has been successfully deleted.");
     } catch (error) {
       console.error("Error deleting referral:", error);
       alert("Failed to delete referral. Please try again.");
@@ -317,6 +360,8 @@ export default function HomePage() {
     setFeaturedReferrals(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     try {
       await updateReferral(id, updates as any);
+      loadReferrals();
+      sendSystemNotification("✏️ Referral Updated", "The referral has been successfully edited.");
     } catch (error: any) {
       console.error("Error updating referral (full):", JSON.stringify(error, null, 2));
       const msg = error?.message || error?.error_description || JSON.stringify(error);
@@ -333,25 +378,77 @@ export default function HomePage() {
     loadReferrals();
   }, [loadReferrals]);
 
+  const blacklistedChartNumbers = useMemo(() =>
+    new Set(referrals.filter(r => r.referral_status?.toLowerCase() === "blacklisted" && r.chart_number).map(r => r.chart_number!)),
+  [referrals]);
+
   // Memoize the filtered non-featured referrals to prevent recomputation
   const visibleReferrals = useMemo(() => {
-    return filteredReferrals.filter(referral => {
-      // Exclude pinned referrals (both pending and approved)
-      if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
-        return false;
-      }
-      return true;
-    });
-  }, [filteredReferrals]);
+    return filteredReferrals
+      .filter(referral => {
+        // Exclude pinned referrals (both pending and approved)
+        if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
+          return false;
+        }
+        // Exclude referrals with pending deletion requests
+        if (referral.deletion_request_status === 'pending') {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTs = new Date(sendBackMap.get(a.id) ?? a.created_at).getTime();
+        const bTs = new Date(sendBackMap.get(b.id) ?? b.created_at).getTime();
+        return sortOrder === "newest" ? bTs - aTs : aTs - bTs;
+      });
+  }, [filteredReferrals, sortOrder, sendBackMap]);
 
   const confirmAcceptReferral = async () => {
     if (!referralToAccept) return;
 
     try {
+      const referral = referrals.find(r => r.id === referralToAccept);
       await acceptReferral(referralToAccept, currentUserName);
       setIsAcceptConfirmOpen(false);
       setReferralToAccept(null);
       loadReferrals();
+      sendSystemNotification("✅ Referral Accepted", "You have successfully accepted the referral.");
+
+      // Auto-create a planner event for the tentative appointment date
+      if (referral?.tentative_appointment_schedule) {
+        try {
+          const apptDate = new Date(referral.tentative_appointment_schedule);
+          const tzOffset = -apptDate.getTimezoneOffset();
+          const sign = tzOffset >= 0 ? '+' : '-';
+          const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+          const toLocalISO = (d: Date) => {
+            const y = d.getFullYear();
+            const mo = String(d.getMonth() + 1).padStart(2, '0');
+            const dy = String(d.getDate()).padStart(2, '0');
+            const h = String(d.getHours()).padStart(2, '0');
+            const mi = String(d.getMinutes()).padStart(2, '0');
+            return `${y}-${mo}-${dy}T${h}:${mi}:00${sign}${pad(tzOffset / 60)}:${pad(tzOffset % 60)}`;
+          };
+          const startISO = toLocalISO(apptDate);
+          const endDate = new Date(apptDate.getTime() + 60 * 60 * 1000);
+          const endISO = toLocalISO(endDate);
+          await createEvent({
+            title: `Referral Appointment — Chart ${referral.chart_number || "N/A"}`,
+            description: `Patient referred for ${referral.treatment_service_destination || "treatment"} from ${referral.clinical_section_origin || "origin"}.`,
+            start_time: startISO,
+            end_time: endISO,
+            color: "#1e3a5f",
+            medical_alert: referral.medical_alert || undefined,
+            notes: referral.notes_and_special_indications || undefined,
+            source: "referral",
+            location: referral.clinical_section_destination || undefined,
+          });
+          clearEventsCache();
+          setPlannerRefreshKey(prev => prev + 1);
+        } catch (eventErr) {
+          console.error("Failed to create appointment event:", eventErr);
+        }
+      }
     } catch (error) {
       console.error("Error accepting referral:", error);
       alert("Failed to accept referral. Please try again.");
@@ -387,28 +484,32 @@ export default function HomePage() {
 
         <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-4 lg:p-5 max-w-[1400px] mx-auto w-full">
         {/* Left Sidebar - Hidden on mobile, shown on lg+ */}
-        <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4">
+        <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4 animate-enter">
           <ProfileCard refreshTrigger={profileRefreshTrigger} />
           <AcceptedReferralsButton count={acceptedCount} />
-          <EditRequestsButton count={editRequestCount} />
-          <SchedulePlanner />
+          <RequestStatusButton count={requestStatusCount} />
+          <ArchivedReferralsButton count={completedCount} />
+          <SchedulePlanner refreshKey={plannerRefreshKey} />
         </aside>
 
         {/* Mobile Profile Card & Buttons - Only shown on mobile */}
-        <div className="lg:hidden space-y-3">
+        <div className="lg:hidden space-y-3 animate-enter">
           <ProfileCard refreshTrigger={profileRefreshTrigger} />
           <div className="flex gap-3">
             <div className="flex-1">
               <AcceptedReferralsButton count={acceptedCount} />
             </div>
             <div className="flex-1">
-              <EditRequestsButton count={editRequestCount} />
+              <RequestStatusButton count={requestStatusCount} />
+            </div>
+            <div className="flex-1">
+              <ArchivedReferralsButton count={completedCount} />
             </div>
           </div>
         </div>
 
         {/* Center Content */}
-        <section className="flex-1 order-2 lg:order-none">
+        <section className="flex-1 order-2 lg:order-none animate-enter-delay-1">
           {/* Header with Make New Referral and Filter */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5">
             <Button
@@ -418,16 +519,31 @@ export default function HomePage() {
               MAKE NEW REFERRAL
             </Button>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs sm:text-sm text-muted-foreground font-semibold">Filter by</span>
-              <div className="relative">
-                <select className="appearance-none bg-white border-2 border-gray-300 rounded px-3 sm:px-4 py-2 pr-8 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-accent">
-                  <option>Date</option>
-                  <option>Status</option>
-                  <option>Department</option>
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-              </div>
+            <div ref={sortRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsSortOpen(p => !p)}
+                className="flex items-center gap-1.5 bg-white border-2 border-secondary/20 hover:border-secondary/50 text-secondary text-xs font-bold uppercase tracking-wide px-3 py-2 rounded shadow-sm transition-colors"
+              >
+                <span>Filter by: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
+              </button>
+              {isSortOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border-2 border-secondary/20 rounded shadow-lg z-50 overflow-hidden min-w-[140px]">
+                  {(["newest", "oldest"] as const).map(opt => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
+                        sortOrder === opt ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"
+                      }`}
+                    >
+                      {opt === "newest" ? "Newest" : "Oldest"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -459,15 +575,23 @@ export default function HomePage() {
                   acceptedBy={referral.accepted_by}
                   acceptedAt={referral.accepted_at}
                   status={referral.status}
-                  showAccept={referral.accepted_by === "None"}
-                  createdAt={referral.created_at}
+                  referralStatus={referral.chart_number && blacklistedChartNumbers.has(referral.chart_number) ? "blacklisted" : (referral.referral_status || null)}
+                  showAccept={referral.accepted_by === "None" && referral.user_id !== currentUserId && !blacklistedChartNumbers.has(referral.chart_number || "")}
+                  createdAt={sendBackMap.get(referral.id) ?? referral.created_at}
                   treatment={referral.treatment || undefined}
                   medicalHistory={referral.medical_history || undefined}
                   isFeatured={referral.is_featured}
                   specialCase={referral.special_case || undefined}
                   tentativeAppointment={referral.tentative_appointment_schedule || undefined}
                   age={referral.age ?? undefined}
+                  sex={referral.sex}
                   userId={referral.user_id}
+                  showUpdate={referral.user_id === currentUserId}
+                  editRequestStatus={referral.edit_request_status}
+                  editRequestReason={referral.edit_request_reason}
+                  rereferRequestStatus={referral.rerefer_request_status}
+                  rereferRequestReason={referral.rerefer_request_reason}
+                  deletionRequestStatus={referral.deletion_request_status}
                   onUpdate={handleUpdateReferral}
                   onAccept={handleAcceptReferral}
                   onDelete={handleDeleteReferral}
@@ -479,7 +603,7 @@ export default function HomePage() {
 
           {/* Mobile Schedule Planner - Only shown on mobile */}
           <div className="lg:hidden mt-4">
-            <SchedulePlanner />
+            <SchedulePlanner refreshKey={plannerRefreshKey} />
           </div>
         </section>
 
@@ -611,20 +735,6 @@ export default function HomePage() {
                 })()}
               </div>
 
-              {/* Special Case Input */}
-              <input
-                type="text"
-                placeholder="By Special Case"
-                value={specialCaseFilter}
-                onChange={(e) => setSpecialCaseFilter(e.target.value)}
-                disabled={!selectedSection || !selectedDiscipline || !selectedTreatment}
-                className={`w-full px-3 py-2.5 text-xs font-semibold border-2 rounded-lg outline-none transition-all ${
-                  !selectedSection || !selectedDiscipline || !selectedTreatment
-                    ? "border-gray-100 bg-gray-50 text-gray-300 placeholder:text-gray-300 cursor-not-allowed"
-                    : "border-gray-200 text-secondary placeholder:text-gray-400 focus:border-secondary focus:ring-1 focus:ring-secondary/20"
-                }`}
-              />
-
               <div className="flex gap-2">
                 <Button 
                   onClick={handleSearch}
@@ -632,7 +742,7 @@ export default function HomePage() {
                 >
                   SEARCH
                 </Button>
-                {(selectedSection || selectedDiscipline || selectedTreatment || specialCaseFilter) && (
+                {(selectedSection || selectedDiscipline || selectedTreatment) && (
                   <Button 
                     onClick={handleResetFilters}
                     variant="outline"
@@ -654,7 +764,7 @@ export default function HomePage() {
               {/* Carousel Container */}
               {featuredReferrals.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground text-sm">
-                  No non-accepted referrals available
+                  No overdue referrals at the moment
                 </div>
               ) : (
                 <div className="relative flex items-center">
@@ -686,13 +796,14 @@ export default function HomePage() {
                         acceptedBy={featuredReferrals[currentSlide].accepted_by}
                         acceptedAt={featuredReferrals[currentSlide].accepted_at}
                         status={featuredReferrals[currentSlide].status}
-                        createdAt={featuredReferrals[currentSlide].created_at}
+                        createdAt={sendBackMap.get(featuredReferrals[currentSlide].id) ?? featuredReferrals[currentSlide].created_at}
                         treatment={featuredReferrals[currentSlide].treatment || undefined}
                         medicalHistory={featuredReferrals[currentSlide].medical_history || undefined}
                         isFeatured={featuredReferrals[currentSlide].is_featured}
                         specialCase={featuredReferrals[currentSlide].special_case || undefined}
                         tentativeAppointment={featuredReferrals[currentSlide].tentative_appointment_schedule || undefined}
                         age={featuredReferrals[currentSlide].age ?? undefined}
+                        sex={featuredReferrals[currentSlide].sex}
                         userId={featuredReferrals[currentSlide].user_id}
                         onAccept={handleAcceptReferral}
                         onUpdate={handleUpdateReferral}

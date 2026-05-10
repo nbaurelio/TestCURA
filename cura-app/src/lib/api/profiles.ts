@@ -28,6 +28,7 @@ export interface Profile {
   clinical_department?: string;
   batch_name?: string;
   role: string;
+  subrole?: string | null;
   adviser_id?: string | null;
   created_at: string;
   updated_at: string;
@@ -92,6 +93,22 @@ export async function getAdvisees(professorId: string): Promise<Profile[]> {
 
   if (error) {
     console.error("Error fetching advisees:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Get all professors
+export async function getProfessors(): Promise<Profile[]> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("role", "professor")
+    .order("last_name", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching professors:", error);
     return [];
   }
 

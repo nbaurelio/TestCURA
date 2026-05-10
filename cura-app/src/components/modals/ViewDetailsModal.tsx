@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Referral, ReferralVersion, StatusChange, RereferralEvent, getReferralHistory, getReferralStatusHistory, getRereferralHistory } from "@/lib/api/referrals";
-import { getProfile } from "@/lib/api/profiles";
+import { getProfile, getCurrentUserId } from "@/lib/api/profiles";
 import { supabase } from "@/lib/supabase";
 import {
   Dialog,
@@ -18,9 +18,10 @@ interface ViewDetailsModalProps {
   referral: Referral | null;
   isOpen: boolean;
   onClose: () => void;
+  hideChartNumber?: boolean;
 }
 
-export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModalProps) {
+export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = false }: ViewDetailsModalProps) {
   const [versions, setVersions] = useState<ReferralVersion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -35,6 +36,15 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
   const [rereferData, setRereferData] = useState<any>(null);
   const [rereferralHistory, setRereferralHistory] = useState<RereferralEvent[]>([]);
   const [rereferralUsers, setRereferralUsers] = useState<Record<string, string>>({});
+  const [currentUserRole, setCurrentUserRole] = useState<string>("");
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [approvalEvents, setApprovalEvents] = useState<{ action: string; userId: string; timestamp: string; approverName: string }[]>([]);
+
+  useEffect(() => {
+    const uid = getCurrentUserId();
+    setCurrentUserId(uid);
+    getProfile(uid).then(p => { if (p) setCurrentUserRole(p.role); });
+  }, []);
 
   useEffect(() => {
     if (!isOpen || !referral) {
@@ -50,6 +60,7 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
       setRereferData(null);
       setRereferralHistory([]);
       setRereferralUsers({});
+      setApprovalEvents([]);
       return;
     }
     const fetchHistory = async () => {
@@ -84,7 +95,7 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
           .from("referrals")
           .select("last_edited_by, last_edited_at")
           .eq("id", referral.id)
-          .single();
+          .single() as { data: { last_edited_by: string | null; last_edited_at: string | null } | null };
         
         if (liveReferral?.last_edited_by) {
           setEditorId(liveReferral.last_edited_by);
@@ -100,7 +111,7 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
           .from("referrals")
           .select("rerefer_requested_by, rerefer_requested_at, rerefer_approved_by, rerefer_approved_at, rerefer_request_status, rerefer_request_reason")
           .eq("id", referral.id)
-          .single();
+          .single() as { data: { rerefer_requested_by: string | null; rerefer_requested_at: string | null; rerefer_approved_by: string | null; rerefer_approved_at: string | null; rerefer_request_status: string | null; rerefer_request_reason: string | null } | null };
 
         setRereferData(liveRereferData);
 
@@ -124,11 +135,33 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
     
     const fetchStatusHistory = async () => {
       try {
-        const history = await getReferralStatusHistory(referral.id);
+        let history = await getReferralStatusHistory(referral.id, referral.chart_number);
+        
+        // Fallback: synthesize status history from referral fields when activity_logs has no entries
+        if (history.length === 0 && referral.accepted_at) {
+          const syntheticHistory: StatusChange[] = [];
+          // 1. ONGOING — when the referral was accepted
+          syntheticHistory.push({
+            status: "ongoing",
+            timestamp: referral.accepted_at,
+            changedBy: referral.accepted_by_user_id || null,
+          });
+          // 2. Final status — completed/deferred/blacklisted
+          const finalStatus = referral.referral_status?.toLowerCase();
+          if (finalStatus && finalStatus !== "ongoing" && ["completed", "deferred", "blacklisted"].includes(finalStatus)) {
+            syntheticHistory.push({
+              status: finalStatus,
+              timestamp: referral.referral_status_changed_at || new Date().toISOString(),
+              changedBy: referral.accepted_by_user_id || null,
+            });
+          }
+          history = syntheticHistory;
+        }
+        
         setStatusHistory(history);
         
         // Fetch user names for status changers
-        const changerIds = [...new Set(history.map(h => h.changedBy).filter(Boolean))];
+        const changerIds = Array.from(new Set(history.map(h => h.changedBy).filter(Boolean)));
         const changersMap: Record<string, string> = {};
         for (const userId of changerIds) {
           const profile = await getProfile(userId!);
@@ -148,7 +181,7 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
         setRereferralHistory(history);
 
         // Fetch user names for all unique user IDs in the history
-        const userIds = [...new Set(history.map(h => h.userId).filter(Boolean))];
+        const userIds = Array.from(new Set(history.map(h => h.userId).filter(Boolean)));
         const usersMap: Record<string, string> = {};
         for (const uid of userIds) {
           const profile = await getProfile(uid);
@@ -162,11 +195,41 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
       }
     };
 
+    const fetchRequestApprovers = async () => {
+      try {
+        const activityLogsTable = supabase.from("activity_logs") as any;
+        const { data } = await activityLogsTable
+          .select("action, user_id, created_at, metadata")
+          .in("action", ["APPROVE_EDIT_REQUEST", "APPROVE_REREFER_REQUEST", "APPROVE_DELETION_REQUEST"])
+          .order("created_at", { ascending: true })
+          .limit(10000);
+
+        const events: { action: string; userId: string; timestamp: string; approverName: string }[] = [];
+        for (const log of (data || [])) {
+          try {
+            const meta = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
+            if (meta?.referral_id !== referral.id) continue;
+            const profile = await getProfile(log.user_id);
+            if (profile) events.push({
+              action: log.action,
+              userId: log.user_id,
+              timestamp: log.created_at,
+              approverName: `${profile.first_name} ${profile.last_name}`,
+            });
+          } catch {}
+        }
+        setApprovalEvents(events);
+      } catch (error) {
+        console.error("Error fetching request approvers:", error);
+      }
+    };
+
     fetchHistory();
     fetchUserInfo();
     fetchStatusHistory();
     fetchRereferralHistory();
-  }, [isOpen, referral?.id]);
+    fetchRequestApprovers();
+  }, [isOpen, referral?.id, referral?.referral_status]);
 
   if (!referral) return null;
 
@@ -176,6 +239,16 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
   const isLatest = currentIndex === total - 1;
   const isOriginal = currentIndex === 0;
   const isAccepted = r.accepted_by && r.accepted_by !== "None";
+  const isCreator = currentUserId === r.user_id;
+  const isAcceptor = !!r.accepted_by_user_id && currentUserId === r.accepted_by_user_id;
+  const isPrivileged = currentUserRole === "professor" || currentUserRole === "clinical-admin";
+  // Creator always sees their own chart number.
+  // Acceptor, professor, clinical-admin only see it once the referral is accepted.
+  // Everyone else never sees it.
+  const canSeeChartNumber =
+    isCreator ||
+    isPrivileged ||
+    (isAccepted && isAcceptor);
 
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleString("en-US", {
@@ -199,21 +272,18 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
     ? "Rereferred"
     : `Version ${currentIndex + 1}`;
 
-  // Filter rereferral history: show events from start up to the next REREFER_REQUEST version
+  // Show rereferral history only for versions where rereferral events have occurred.
+  // On the latest version: show ALL rereferral events (approve/sent-back happen after the rerefer snapshot).
+  // On older versions: only show events up to that version's timestamp.
   const filteredRereferralHistory = (() => {
-    if (!currentVersion || currentVersion.action !== "REREFER_REQUEST") return [];
+    if (!currentVersion || rereferralHistory.length === 0) return [];
+
+    if (isLatest) return rereferralHistory;
+
     const currentTs = new Date(currentVersion.timestamp).getTime();
-    // Find the next REREFER_REQUEST version after the current one
-    const nextRereferVersion = versions.find(v =>
-      v.action === "REREFER_REQUEST" && new Date(v.timestamp).getTime() > currentTs
+    return rereferralHistory.filter(e =>
+      new Date(e.timestamp).getTime() <= currentTs + 1000 // 1s tolerance for near-simultaneous events
     );
-    const upperBound = nextRereferVersion
-      ? new Date(nextRereferVersion.timestamp).getTime()
-      : Infinity;
-    return rereferralHistory.filter(e => {
-      const eventTs = new Date(e.timestamp).getTime();
-      return eventTs < upperBound;
-    });
   })();
 
   return (
@@ -264,11 +334,39 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
                       <span className="text-white/40 text-[9px]">{currentIndex + 1} / {total}</span>
                     )}
                   </div>
-                  {currentVersion && (
-                    <p className="text-white/55 text-[9px] mt-0.5 truncate">
-                      {currentVersion.action === "CREATE_REFERRAL" ? "Created" : currentVersion.action === "REREFER_REQUEST" ? "Rereferred" : "Updated"}: {formatDateTime(currentVersion.timestamp)}
-                    </p>
-                  )}
+                  {currentVersion && (() => {
+                    const versionTs = new Date(currentVersion.timestamp).getTime();
+                    const prevVersionTs = currentIndex > 0
+                      ? new Date(versions[currentIndex - 1].timestamp).getTime()
+                      : 0;
+                    // EDIT: find an APPROVE_EDIT_REQUEST event that occurred between prev version and this version
+                    const editApprover = currentVersion.action === "UPDATE_REFERRAL"
+                      ? approvalEvents
+                          .filter(e => e.action === "APPROVE_EDIT_REQUEST" &&
+                            new Date(e.timestamp).getTime() > prevVersionTs &&
+                            new Date(e.timestamp).getTime() <= versionTs)
+                          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]
+                      : null;
+                    // REREFER: approval comes AFTER the rerefer snapshot → find earliest approval after versionTs
+                    const rereferApprover = currentVersion.action === "REREFER_REQUEST"
+                      ? approvalEvents
+                          .filter(e => e.action === "APPROVE_REREFER_REQUEST" && new Date(e.timestamp).getTime() >= versionTs)
+                          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0]
+                      : null;
+                    const matchedApprover = editApprover ?? rereferApprover;
+                    return (
+                      <div>
+                        <p className="text-white/55 text-[9px] mt-0.5 truncate">
+                          {currentVersion.action === "CREATE_REFERRAL" ? "Created" : currentVersion.action === "REREFER_REQUEST" ? "Rereferred" : "Updated"}: {formatDateTime(currentVersion.timestamp)}
+                        </p>
+                        {matchedApprover && (
+                          <p className="text-green-300/80 text-[9px] mt-0.5 truncate">
+                            Approved By: {matchedApprover.approverName}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -289,7 +387,7 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
           <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3">
             <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5">Patient Info</h3>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-              {r.chart_number && (
+              {r.chart_number && !hideChartNumber && canSeeChartNumber && (
                 <div>
                   <p className="text-[10px] font-semibold text-gray-500">Chart Number</p>
                   <p className="text-xs text-gray-800 font-medium">{r.chart_number}</p>
@@ -299,6 +397,12 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
                 <p className="text-[10px] font-semibold text-gray-500">Age</p>
                 <p className="text-xs text-gray-800 font-medium">{r.age ? `${r.age} yrs old` : "—"}</p>
               </div>
+              {r.sex && (
+                <div>
+                  <p className="text-[10px] font-semibold text-gray-500">Sex</p>
+                  <p className="text-xs text-gray-800 font-medium">{r.sex}</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -359,7 +463,7 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
             <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 border border-gray-200">
               <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5">Tentative Appointment</h3>
               <p className="text-xs text-gray-800 font-medium">
-                {new Date(r.tentative_appointment_schedule).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+                {new Date(r.tentative_appointment_schedule!).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
               </p>
             </div>
           )}
@@ -371,6 +475,113 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
               <div className="text-xs text-gray-800 break-words [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:my-0.5" dangerouslySetInnerHTML={{ __html: r.notes_and_special_indications }} />
             </div>
           )}
+
+          {/* Referral Timeline — duration metrics scoped to current version's cycle */}
+          {(() => {
+            // Convert ms to days: <8hrs = 0d, >=8hrs = at least 1d, then round normally.
+            const msToDays = (ms: number | null): number | null => {
+              if (ms === null || ms < 0) return null;
+              const hours = ms / (1000 * 60 * 60);
+              if (hours < 8) return 0;
+              return Math.max(1, Math.round(hours / 24));
+            };
+            const fmtDays = (n: number | null) => n === null ? "—" : `${n} day${n === 1 ? "" : "s"}`;
+
+            // Cycle bounds: from this version's timestamp to next version's timestamp (or now if latest).
+            // Special case: for REREFER_REQUEST versions, the cycle only truly starts when the referral
+            // is SENT BACK to the system (after professor approval). Use that timestamp instead.
+            const versionStartTs = currentVersion ? new Date(currentVersion.timestamp).getTime() : new Date(r.created_at).getTime();
+            const versionEndTs = (currentIndex < total - 1)
+              ? new Date(versions[currentIndex + 1].timestamp).getTime()
+              : Date.now();
+
+            const isRerefer = currentVersion?.action === "REREFER_REQUEST";
+            const sendBackEvent = isRerefer
+              ? rereferralHistory.find(e =>
+                  e.action === "SEND_BACK_TO_SYSTEM" &&
+                  new Date(e.timestamp).getTime() >= versionStartTs &&
+                  new Date(e.timestamp).getTime() <= versionEndTs + 1000
+                )
+              : null;
+            const sendBackTs = sendBackEvent ? new Date(sendBackEvent.timestamp).getTime() : null;
+            const cycleStartTs = sendBackTs ?? versionStartTs;
+            const cycleEndTs = versionEndTs;
+            const rereferNotSentBack = isRerefer && sendBackTs === null;
+
+            // Find acceptance + final-status events within this cycle from statusHistory
+            const inCycle = (ts: string) => {
+              const t = new Date(ts).getTime();
+              return t >= cycleStartTs - 1000 && t <= cycleEndTs + 1000;
+            };
+            const acceptedEvent = statusHistory.find(s => s.status === "ongoing" && inCycle(s.timestamp));
+            const finalEvent = statusHistory.find(s =>
+              ["completed", "deferred", "blacklisted"].includes(s.status) && inCycle(s.timestamp)
+            );
+
+            // Fallback to live referral fields when no status-history entry matches and we're on the latest version
+            const isLatestVersion = currentIndex === total - 1;
+            const liveAcceptedTs = isLatestVersion && r.accepted_at ? new Date(r.accepted_at).getTime() : null;
+            const liveCompletedTs = isLatestVersion && r.referral_status_changed_at && ["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() || "")
+              ? new Date(r.referral_status_changed_at).getTime()
+              : null;
+
+            const acceptedTs = acceptedEvent ? new Date(acceptedEvent.timestamp).getTime()
+              : (liveAcceptedTs !== null && liveAcceptedTs >= cycleStartTs ? liveAcceptedTs : null);
+            const finalTs = finalEvent ? new Date(finalEvent.timestamp).getTime()
+              : (liveCompletedTs !== null && liveCompletedTs >= cycleStartTs ? liveCompletedTs : null);
+
+            const cycleLabel = isRerefer ? "Rereferral Cycle" : "Referral Timeline";
+            const cycleStartLabel = isRerefer ? "Sent Back to System" : "Referral Start";
+
+            const rows: { label: string; value: string }[] = [];
+
+            if (rereferNotSentBack) {
+              // Rereferral approved but not yet sent back — counter hasn't started.
+              rows.push({
+                label: "Rereferral Requested",
+                value: new Date(versionStartTs).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }),
+              });
+              rows.push({ label: "Status", value: "Awaiting send-back to system" });
+            } else {
+              rows.push({
+                label: cycleStartLabel,
+                value: new Date(cycleStartTs).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }),
+              });
+
+              if (finalTs !== null && acceptedTs !== null) {
+                const finalLabel = (finalEvent?.status || r.referral_status?.toLowerCase() || "completed");
+                const labelMap: Record<string, string> = { completed: "Days to Completion", deferred: "Days to Deferral", blacklisted: "Days to Blacklist" };
+                rows.push({ label: "Days to Acceptance", value: fmtDays(msToDays(acceptedTs - cycleStartTs)) });
+                rows.push({ label: labelMap[finalLabel] || "Days to Final Status", value: fmtDays(msToDays(finalTs - acceptedTs)) });
+              } else if (acceptedTs !== null) {
+                rows.push({ label: "Days to Acceptance", value: fmtDays(msToDays(acceptedTs - cycleStartTs)) });
+                rows.push({ label: "Days Since Acceptance", value: fmtDays(msToDays(cycleEndTs - acceptedTs)) });
+              } else {
+                rows.push({ label: isLatestVersion ? "Days in System" : "Days in Cycle", value: fmtDays(msToDays(cycleEndTs - cycleStartTs)) });
+              }
+            }
+
+            return (
+              <div className="bg-secondary/5 rounded-lg p-2.5 sm:p-3 border border-secondary/20">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide">{cycleLabel}</h3>
+                  {total > 1 && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-secondary/10 text-secondary/70">
+                      Cycle {currentIndex + 1} / {total}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {rows.map((row, i) => (
+                    <div key={i} className={i === 0 ? "col-span-2" : ""}>
+                      <p className="text-[10px] font-semibold text-gray-500">{row.label}</p>
+                      <p className="text-xs text-gray-800 font-medium">{row.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Accepted By */}
           {isAccepted && (
@@ -449,60 +660,6 @@ export function ViewDetailsModal({ referral, isOpen, onClose }: ViewDetailsModal
             </div>
           )}
 
-          {/* Rereferral History — only shown on rerefer versions */}
-          {filteredRereferralHistory.length > 0 && currentVersion?.action === "REREFER_REQUEST" && (
-            <div className="bg-amber-50 rounded-lg p-2.5 sm:p-3 border border-amber-200">
-              <h3 className="text-[10px] font-bold text-amber-700 uppercase tracking-wide mb-2">Rereferral History</h3>
-              <div className="relative pl-4">
-                {/* Timeline line */}
-                <div className="absolute left-[5px] top-1 bottom-1 w-[2px] bg-amber-300" />
-                <div className="space-y-3">
-                  {filteredRereferralHistory.map((event, index) => {
-                    const isRequest = event.action === "REREFER_REQUEST";
-                    const isApprove = event.action === "APPROVE_REREFER_REQUEST";
-                    const isDecline = event.action === "DECLINE_REREFER_REQUEST";
-                    const dotColor = isRequest
-                      ? "bg-amber-500"
-                      : isApprove
-                      ? "bg-green-500"
-                      : "bg-red-500";
-                    const label = isRequest
-                      ? "Rerefer Requested"
-                      : isApprove
-                      ? "Rerefer Approved"
-                      : "Rerefer Declined";
-                    const textColor = isRequest
-                      ? "text-amber-700"
-                      : isApprove
-                      ? "text-green-700"
-                      : "text-red-700";
-
-                    return (
-                      <div key={index} className="relative">
-                        {/* Timeline dot */}
-                        <div className={`absolute -left-4 top-[3px] w-[10px] h-[10px] rounded-full ${dotColor} border-2 border-white shadow-sm`} />
-                        <div>
-                          <p className={`text-[10px] font-bold uppercase tracking-wide ${textColor}`}>
-                            {label}
-                          </p>
-                          <div className="text-xs text-gray-800 font-medium">
-                            {event.userId && rereferralUsers[event.userId] ? (
-                              <UserProfilePopover userId={event.userId} displayName={rereferralUsers[event.userId]} />
-                            ) : (
-                              <span>Unknown</span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            {new Date(event.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Close Button */}
           <div className="pt-1">

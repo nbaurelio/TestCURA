@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Search, FileText, Bell, LogOut, User, Activity, ChevronDown, Calendar, MapPin, Clock } from "lucide-react";
+import { Search, FileText, Bell, LogOut, User, Activity, ChevronDown, Calendar, MapPin, Clock, Archive } from "lucide-react";
 import { getMockUserProfile, Profile, getMockUserProfileSync, hasProfileCache } from "@/lib/api/profiles";
 import { useAuth } from "@/context/AuthContext";
 import { getReferralNotifications, getCalendarNotifications, formatActionLabel, getActionColor, ReferralNotification, CalendarNotification } from "@/lib/api/notifications";
@@ -47,8 +47,6 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
     { value: "medical_alert",   label: "Medical Alert" },
     { value: "origin",          label: "Origin" },
     { value: "destination",     label: "Destination" },
-    { value: "medical_history", label: "Medical History" },
-    { value: "approved_by",     label: "Approved By" },
   ];
 
   const selectedLabel = CATEGORIES.find(c => c.value === searchCategory)?.label ?? "Medical Alert";
@@ -119,8 +117,17 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
 
   return (
     <>
-      <header className="sticky top-0 z-50 flex items-center justify-between px-4 sm:px-6 py-0.5 bg-[#87c4d8] border-b border-[#6aafc8] shadow-[0_4px_16px_0_rgba(106,175,200,0.35)]">
-        <Link href={role === "professor" ? "/professor" : "/home"} className="flex items-center">
+      <header className="sticky top-0 z-[60] flex items-center justify-between px-4 sm:px-6 py-0.5 bg-[#87c4d8] border-b border-[#6aafc8] shadow-[0_4px_16px_0_rgba(106,175,200,0.35)]">
+        <Link href={role === "clinical_admin" ? "/clinical-admin" : role === "professor" ? "/professor" : "/home"} className="flex items-center gap-2.5">
+          <Image
+            src="/upcd_logo.png"
+            alt="UPCD Logo"
+            width={34}
+            height={34}
+            className="object-contain"
+            priority
+          />
+          <div className="w-px h-7 bg-secondary mx-0.5" />
           <Image 
             src="/CURA_Full_WhiteTooth.png" 
             alt="CURA Logo" 

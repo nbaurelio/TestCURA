@@ -91,7 +91,7 @@ export default function ActivityLogsPage() {
 
       <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-3 sm:p-5 max-w-[1400px] mx-auto w-full">
         {/* Left Sidebar - Hidden on mobile */}
-        <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4">
+        <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4 animate-enter">
           <ProfileCard />
           <SchedulePlanner />
         </aside>
@@ -108,7 +108,7 @@ export default function ActivityLogsPage() {
           </Link>
 
           {/* Header Bar */}
-          <div className="bg-secondary rounded-lg p-5 mb-5 shadow relative">
+          <div className="bg-secondary rounded-lg p-5 mb-5 shadow relative animate-enter">
             <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_80%_50%,white_0%,transparent_50%)]" />
             <div className="relative flex items-center justify-between gap-4 flex-wrap">
               <div>

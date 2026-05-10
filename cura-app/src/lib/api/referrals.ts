@@ -3,7 +3,7 @@ import { getCurrentUserId } from "@/lib/api/profiles";
 
 // Simple cache for referrals to prevent redundant API calls
 let referralsCache: { data: Referral[]; timestamp: number } | null = null;
-const CACHE_DURATION = 5000; // 5 seconds
+const CACHE_DURATION = 30000; // 30 seconds
 
 export function clearReferralsCache() {
   referralsCache = null;
@@ -13,6 +13,7 @@ export interface ReferralFormData {
   chart_number: string;
   treatment?: string;
   age?: number;
+  sex?: string;
   medical_alert?: string;
   clinical_section_origin: string;
   clinical_discipline_origin?: string;
@@ -86,6 +87,7 @@ export async function createReferral(data: ReferralFormData, allowDuplicate = fa
       chart_number: data.chart_number,
       treatment: data.treatment || null,
       age: data.age || null,
+      sex: data.sex || null,
       medical_alert: data.medical_alert || null,
       clinical_section_origin: data.clinical_section_origin,
       clinical_discipline_origin: data.clinical_discipline_origin || null,
@@ -132,6 +134,7 @@ export interface Referral {
   chart_number: string;
   treatment: string | null;
   age: number | null;
+  sex?: string | null;
   medical_alert: string | null;
   clinical_section_origin: string;
   clinical_section_destination: string;
@@ -149,13 +152,16 @@ export interface Referral {
   accepted_by_user_id: string | null;
   accepted_at: string | null;
   edit_request_reason: string | null;
+  edit_request_decline_reason: string | null;
   edit_request_status: string | null;
+  edit_request_professor_ids?: string[] | null;
   last_edited_by: string | null;
   last_edited_at: string | null;
   referral_status: string | null;
   referral_status_changed_at: string | null;
   rerefer_request_reason: string | null;
   rerefer_request_status: string | null;
+  rerefer_request_professor_ids?: string[] | null;
   rerefer_requested_by: string | null;
   rerefer_requested_at: string | null;
   rerefer_approved_by: string | null;
@@ -163,7 +169,9 @@ export interface Referral {
   rerefer_declined_by: string | null;
   rerefer_declined_at: string | null;
   deletion_request_reason: string | null;
+  deletion_request_decline_reason: string | null;
   deletion_request_status: string | null;
+  deletion_request_professor_ids?: string[] | null;
   deletion_requested_by: string | null;
   deletion_requested_at: string | null;
   created_at: string;
@@ -203,6 +211,7 @@ export async function updateReferral(id: string, updates: Partial<ReferralFormDa
   const safeUpdates: Record<string, unknown> = {};
   if (updates.chart_number !== undefined) safeUpdates.chart_number = updates.chart_number;
   if (updates.age !== undefined) safeUpdates.age = updates.age ?? null;
+  if ((updates as any).sex !== undefined) safeUpdates.sex = (updates as any).sex || null;
   if (updates.medical_alert !== undefined) safeUpdates.medical_alert = updates.medical_alert || null;
   if (updates.clinical_section_origin !== undefined) safeUpdates.clinical_section_origin = updates.clinical_section_origin;
   if (updates.clinical_discipline_origin !== undefined) safeUpdates.clinical_discipline_origin = updates.clinical_discipline_origin || null;
@@ -236,7 +245,7 @@ export async function updateReferral(id: string, updates: Partial<ReferralFormDa
 
   // Log the activity
   const hasStatusChange = (updates as any).referral_status !== undefined;
-  await activityLogsTable.insert({
+  const logResult = await activityLogsTable.insert({
     user_id: mockUserId,
     action: hasStatusChange ? "CHANGE_REFERRAL_STATUS" : "UPDATE_REFERRAL",
     description: hasStatusChange 
@@ -265,18 +274,17 @@ export interface ReferralVersion {
 export async function getReferralHistory(referralId: string): Promise<ReferralVersion[]> {
   const activityLogsTable = supabase.from("activity_logs") as any;
 
-  // First try: fetch all CREATE/UPDATE logs and filter client-side
+  // Fetch logs for this specific referral — filter server-side using jsonb contains on metadata
   const { data, error } = await activityLogsTable
     .select("action, created_at, metadata")
     .in("action", ["CREATE_REFERRAL", "UPDATE_REFERRAL", "REREFER_REQUEST"])
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .limit(10000);
 
   if (error) {
     console.error("getReferralHistory query error:", error);
     throw error;
   }
-
-  console.log("getReferralHistory: total logs fetched:", data?.length, "for referral:", referralId);
 
   const filtered = ((data || []) as any[]).filter((log: any) => {
     try {
@@ -287,7 +295,6 @@ export async function getReferralHistory(referralId: string): Promise<ReferralVe
     }
   });
 
-  console.log("getReferralHistory: logs matching referral:", filtered.length);
 
   return filtered
     .map((log: any) => {
@@ -315,19 +322,22 @@ export interface StatusChange {
   changedBy: string | null;
 }
 
-export async function getReferralStatusHistory(referralId: string): Promise<StatusChange[]> {
+export async function getReferralStatusHistory(referralId: string, chartNumber?: string | null): Promise<StatusChange[]> {
   const activityLogsTable = supabase.from("activity_logs") as any;
 
   // Fetch both status changes and accept logs to resolve the real acceptor for ONGOING
+  // Filter server-side using jsonb contains on metadata
   const [statusRes, acceptRes] = await Promise.all([
     activityLogsTable
       .select("*")
       .eq("action", "CHANGE_REFERRAL_STATUS")
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: true })
+      .limit(10000),
     activityLogsTable
       .select("*")
       .eq("action", "ACCEPT_REFERRAL")
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .limit(10000),
   ]);
 
   if (statusRes.error) {
@@ -338,32 +348,43 @@ export async function getReferralStatusHistory(referralId: string): Promise<Stat
   // Find the acceptor's user_id for this referral
   let acceptorUserId: string | null = null;
   for (const log of (acceptRes.data || []) as any[]) {
+    let matched = false;
     try {
       const parsed = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
-      if (parsed?.referral_id === referralId) {
-        acceptorUserId = log.user_id as string;
-        break;
-      }
+      if (parsed?.referral_id === referralId) matched = true;
     } catch {}
+    if (!matched && chartNumber && log.description?.includes(chartNumber)) matched = true;
+    if (matched) { acceptorUserId = log.user_id as string; break; }
   }
 
   const filtered = ((statusRes.data || []) as any[]).filter((log: any) => {
+    // Primary: match by referral_id in metadata
     try {
       const parsed = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
-      return parsed?.referral_id === referralId;
-    } catch {
-      return false;
-    }
+      if (parsed?.referral_id === referralId) return true;
+    } catch {}
+    // Fallback: match by chart number in description (when metadata column doesn't exist or is empty)
+    if (chartNumber && log.description && log.description.includes(chartNumber)) return true;
+    return false;
   });
 
   return filtered
     .map((log: any) => {
       try {
-        const parsed = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
-        const status = parsed?.new_status || "unknown";
+        let status = "unknown";
+        // Try to get status from metadata first
+        try {
+          const parsed = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
+          if (parsed?.new_status) status = parsed.new_status;
+        } catch {}
+        // Fallback: extract status from description string
+        if (status === "unknown" && log.description) {
+          const match = log.description.match(/CHANGED REFERRAL STATUS TO (\w+)/i);
+          if (match) status = match[1].toLowerCase();
+        }
         // For the initial ONGOING, use the acceptor's user_id if available
         const changedBy = (status === "ongoing" && acceptorUserId)
-          ? (parsed?.accepted_by_user_id || acceptorUserId)
+          ? acceptorUserId
           : log.user_id as string;
         return {
           status,
@@ -395,6 +416,7 @@ export async function acceptReferral(id: string, acceptedBy: string) {
   const { data, error } = await referralsTable
     .update({
       accepted_by: acceptedBy,
+      accepted_by_user_id: mockUserId,
       accepted_at: new Date().toISOString(),
       status: "pending",
       referral_status: "ongoing",
@@ -519,7 +541,7 @@ export async function deleteReferral(id: string) {
   return true;
 }
 
-export async function submitEditRequest(id: string, reason: string) {
+export async function submitEditRequest(id: string, reason: string, professorIds: string[] = []) {
   const mockUserId = getCurrentUserId();
   const referralsTable = supabase.from("referrals") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
@@ -528,6 +550,7 @@ export async function submitEditRequest(id: string, reason: string) {
     .update({
       edit_request_reason: reason,
       edit_request_status: "pending",
+      edit_request_professor_ids: professorIds.length > 0 ? professorIds : null,
     } as any)
     .eq("id", id)
     .select()
@@ -541,6 +564,9 @@ export async function submitEditRequest(id: string, reason: string) {
     description: `EDIT REQUEST SUBMITTED - Chart: ${data.chart_number}, Reason: ${reason}`,
     metadata: JSON.stringify({ referral_id: id, reason })
   } as any);
+
+  // Clear cache after mutation
+  clearReferralsCache();
 
   return data;
 }
@@ -564,21 +590,26 @@ export async function approveEditRequest(id: string) {
     user_id: mockUserId,
     action: "APPROVE_EDIT_REQUEST",
     description: `EDIT REQUEST APPROVED - Chart: ${data.chart_number}`,
-    metadata: JSON.stringify({ referral_id: id })
+    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, requested_by_user_id: data.user_id })
   } as any);
+
+  // Clear cache after mutation
+  clearReferralsCache();
 
   return data;
 }
 
-export async function declineEditRequest(id: string) {
+export async function declineEditRequest(id: string, reason?: string) {
   const mockUserId = getCurrentUserId();
   const referralsTable = supabase.from("referrals") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
 
+  const { data: current } = await referralsTable.select("edit_request_reason").eq("id", id).single();
+
   const { data, error } = await referralsTable
     .update({
       edit_request_status: "declined",
-      edit_request_reason: null,
+      edit_request_decline_reason: reason || null,
     } as any)
     .eq("id", id)
     .select()
@@ -589,14 +620,17 @@ export async function declineEditRequest(id: string) {
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DECLINE_EDIT_REQUEST",
-    description: `EDIT REQUEST DECLINED - Chart: ${data.chart_number}`,
-    metadata: JSON.stringify({ referral_id: id })
+    description: `EDIT REQUEST DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: data.user_id })
   } as any);
+
+  // Clear cache after mutation
+  clearReferralsCache();
 
   return data;
 }
 
-export async function submitRereferRequest(id: string, reason: string) {
+export async function submitRereferRequest(id: string, reason: string, professorIds: string[] = []) {
   const mockUserId = getCurrentUserId();
 
   const referralsTable = supabase.from("referrals") as any;
@@ -609,6 +643,7 @@ export async function submitRereferRequest(id: string, reason: string) {
       rerefer_request_status: "pending",
       rerefer_requested_by: mockUserId,
       rerefer_requested_at: new Date().toISOString(),
+      rerefer_request_professor_ids: professorIds.length > 0 ? professorIds : null,
     } as any)
     .eq("id", id)
     .select()
@@ -647,16 +682,12 @@ export async function approveRereferRequest(id: string) {
     .eq("id", id)
     .single();
 
-  // Move to rereferrals by clearing accepted_by and setting status
+  // Mark rerefer as approved — referral stays in accepted-referrals until clinician sends it back
   const { data, error } = await referralsTable
     .update({
       rerefer_request_status: "approved",
       rerefer_approved_by: mockUserId,
       rerefer_approved_at: new Date().toISOString(),
-      accepted_by: "None",
-      accepted_at: null,
-      status: "pending",
-      is_featured: false,
     } as any)
     .eq("id", id)
     .select()
@@ -673,6 +704,7 @@ export async function approveRereferRequest(id: string) {
       referral_id: id,
       chart_number: data.chart_number,
       previous_accepted_by: currentData?.accepted_by,
+      requested_by_user_id: currentData?.rerefer_requested_by,
     })
   } as any);
 
@@ -682,7 +714,7 @@ export async function approveRereferRequest(id: string) {
   return data;
 }
 
-export async function declineRereferRequest(id: string) {
+export async function declineRereferRequest(id: string, reason?: string) {
   const mockUserId = getCurrentUserId();
 
   const referralsTable = supabase.from("referrals") as any;
@@ -693,6 +725,7 @@ export async function declineRereferRequest(id: string) {
       rerefer_request_status: "declined",
       rerefer_declined_by: mockUserId,
       rerefer_declined_at: new Date().toISOString(),
+      rerefer_request_reason: reason || null,
     } as any)
     .eq("id", id)
     .select()
@@ -703,14 +736,43 @@ export async function declineRereferRequest(id: string) {
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DECLINE_REREFER_REQUEST",
-    description: `REREFER REQUEST DECLINED - Chart: ${data.chart_number}`,
-    metadata: JSON.stringify({ referral_id: id })
+    description: `REREFER REQUEST DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: data.rerefer_requested_by })
   } as any);
 
   return data;
 }
 
-export async function submitDeletionRequest(id: string, reason: string) {
+export async function cancelDeletionRequest(id: string) {
+  const mockUserId = getCurrentUserId();
+  const referralsTable = supabase.from("referrals") as any;
+  const activityLogsTable = supabase.from("activity_logs") as any;
+
+  const { data, error } = await referralsTable
+    .update({
+      deletion_request_reason: null,
+      deletion_request_status: null,
+      deletion_requested_by: null,
+      deletion_requested_at: null,
+    } as any)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  await activityLogsTable.insert({
+    user_id: mockUserId,
+    action: "CANCEL_DELETION_REQUEST",
+    description: `DELETION REQUEST CANCELLED - Chart: ${data.chart_number}`,
+    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number })
+  } as any);
+
+  clearReferralsCache();
+  return data;
+}
+
+export async function submitDeletionRequest(id: string, reason: string, professorIds: string[] = []) {
   const mockUserId = getCurrentUserId();
   const referralsTable = supabase.from("referrals") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
@@ -721,6 +783,7 @@ export async function submitDeletionRequest(id: string, reason: string) {
       deletion_request_status: "pending",
       deletion_requested_by: mockUserId,
       deletion_requested_at: new Date().toISOString(),
+      deletion_request_professor_ids: professorIds.length > 0 ? professorIds : null,
     } as any)
     .eq("id", id)
     .select()
@@ -761,7 +824,7 @@ export async function approveDeletionRequest(id: string) {
     user_id: mockUserId,
     action: "APPROVE_DELETION_REQUEST",
     description: `DELETION REQUEST APPROVED - Chart: ${referral.chart_number}`,
-    metadata: JSON.stringify({ referral_id: id, chart_number: referral.chart_number })
+    metadata: JSON.stringify({ referral_id: id, chart_number: referral.chart_number, requested_by_user_id: referral.deletion_requested_by })
   } as any);
 
   // Log notification for the requester
@@ -781,15 +844,19 @@ export async function approveDeletionRequest(id: string) {
   clearReferralsCache();
 }
 
-export async function declineDeletionRequest(id: string) {
+export async function declineDeletionRequest(id: string, reason?: string) {
   const mockUserId = getCurrentUserId();
   const referralsTable = supabase.from("referrals") as any;
   const activityLogsTable = supabase.from("activity_logs") as any;
 
+  // Fetch current data to get deletion_requested_by before nulling it
+  const { data: current } = await referralsTable.select("deletion_requested_by").eq("id", id).single();
+  const requestedBy = current?.deletion_requested_by;
+
   const { data, error } = await referralsTable
     .update({
       deletion_request_status: "declined",
-      deletion_request_reason: null,
+      deletion_request_decline_reason: reason || null,
       deletion_requested_by: null,
       deletion_requested_at: null,
     } as any)
@@ -800,21 +867,20 @@ export async function declineDeletionRequest(id: string) {
   if (error) throw error;
 
   // Notify the requester
-  const requestedBy = (data as any).deletion_requested_by;
   if (requestedBy && requestedBy !== mockUserId) {
     await activityLogsTable.insert({
       user_id: requestedBy,
       action: "DECLINE_DELETION_REQUEST",
-      description: `YOUR DELETION REQUEST WAS DECLINED - Chart: ${data.chart_number}`,
-      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number })
+      description: `YOUR DELETION REQUEST WAS DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason })
     } as any);
   }
 
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DECLINE_DELETION_REQUEST",
-    description: `DELETION REQUEST DECLINED - Chart: ${data.chart_number}`,
-    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number })
+    description: `DELETION REQUEST DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: requestedBy })
   } as any);
 
   clearReferralsCache();
@@ -822,11 +888,54 @@ export async function declineDeletionRequest(id: string) {
 }
 
 export interface RereferralEvent {
-  action: "REREFER_REQUEST" | "APPROVE_REREFER_REQUEST" | "DECLINE_REREFER_REQUEST";
+  action: "REREFER_REQUEST" | "APPROVE_REREFER_REQUEST" | "DECLINE_REREFER_REQUEST" | "SEND_BACK_TO_SYSTEM";
   userId: string;
   timestamp: string;
   reason?: string;
   previousAcceptedBy?: string;
+}
+
+export async function sendBackToSystem(id: string) {
+  const userId = getCurrentUserId();
+
+  const referralsTable = supabase.from("referrals") as any;
+  const activityLogsTable = supabase.from("activity_logs") as any;
+
+  const { data: currentData } = await referralsTable
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  const { data, error } = await referralsTable
+    .update({
+      accepted_by: "None",
+      accepted_by_user_id: null,
+      accepted_at: null,
+      is_featured: false,
+      status: "pending",
+      rerefer_request_status: "completed",
+    } as any)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  await activityLogsTable.insert({
+    user_id: userId,
+    action: "SEND_BACK_TO_SYSTEM",
+    description: `REFERRAL SENT BACK TO SYSTEM - Chart: ${data.chart_number}`,
+    metadata: JSON.stringify({
+      referral_id: id,
+      chart_number: data.chart_number,
+      previous_accepted_by: currentData?.accepted_by,
+      previous_accepted_by_user_id: currentData?.accepted_by_user_id,
+    }),
+  } as any);
+
+  clearReferralsCache();
+
+  return data;
 }
 
 export async function getRereferralHistory(referralId: string): Promise<RereferralEvent[]> {
@@ -834,8 +943,9 @@ export async function getRereferralHistory(referralId: string): Promise<Rereferr
 
   const { data, error } = await activityLogsTable
     .select("*")
-    .in("action", ["REREFER_REQUEST", "APPROVE_REREFER_REQUEST", "DECLINE_REREFER_REQUEST"])
-    .order("created_at", { ascending: true });
+    .in("action", ["REREFER_REQUEST", "APPROVE_REREFER_REQUEST", "DECLINE_REREFER_REQUEST", "SEND_BACK_TO_SYSTEM"])
+    .order("created_at", { ascending: true })
+    .limit(10000);
 
   if (error) throw error;
 

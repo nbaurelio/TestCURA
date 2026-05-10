@@ -20,7 +20,7 @@ interface EditReferralModalProps {
   referral: Referral | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (id: string, updates: Partial<Referral>) => void;
+  onSave: (id: string, updates: Partial<Referral>) => void | Promise<void>;
 }
 
 export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditReferralModalProps) {
@@ -28,6 +28,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
   const [formData, setFormData] = useState({
     chart_number: "",
     age: "",
+    sex: "",
     medical_alert: "",
     clinical_section_origin: "",
     clinical_section_destination: "",
@@ -50,6 +51,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
       setFormData({
         chart_number: referral.chart_number || "",
         age: referral.age?.toString() || "",
+        sex: referral.sex || "",
         medical_alert: referral.medical_alert || "",
         clinical_section_origin: referral.clinical_section_origin || "",
         clinical_section_destination: referral.clinical_section_destination || "",
@@ -58,7 +60,13 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
         treatment_service_origin: referral.treatment_service_origin || "",
         treatment_service_destination: referral.treatment_service_destination || "",
         special_case: referral.special_case || "",
-        tentative_appointment_schedule: referral.tentative_appointment_schedule || "",
+        tentative_appointment_schedule: (() => {
+          const raw = referral.tentative_appointment_schedule;
+          if (!raw) return "";
+          const d = new Date(raw);
+          const pad = (n: number) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        })(),
         notes_and_special_indications: referral.notes_and_special_indications || "",
       });
 
@@ -164,6 +172,7 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
     setFormData(prev => ({
       ...prev,
       treatment_service_destination: treatmentName,
+      special_case: treatmentName === "Special Case" ? prev.special_case : "",
     }));
   };
 
@@ -198,16 +207,24 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
     setIsConfirmOpen(true);
   };
 
-  const confirmSave = () => {
-    onSave(referral.id, {
+  const confirmSave = async () => {
+    const apptRaw = formData.tentative_appointment_schedule;
+    let apptISO: string | null = null;
+    if (apptRaw) {
+      const d = new Date(apptRaw);
+      const tzOffset = -d.getTimezoneOffset();
+      const sign = tzOffset >= 0 ? '+' : '-';
+      const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+      apptISO = `${apptRaw.substring(0, 16)}:00${sign}${pad(tzOffset / 60)}:${pad(tzOffset % 60)}`;
+    }
+    await onSave(referral.id, {
       ...formData,
       age: formData.age ? parseInt(formData.age) : null,
-      tentative_appointment_schedule: formData.tentative_appointment_schedule || null,
+      tentative_appointment_schedule: apptISO,
       edit_request_reason: null,
       edit_request_status: null,
     });
     setIsConfirmOpen(false);
-    onClose();
   };
 
   return (
@@ -255,6 +272,18 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
                     onChange={(e) => setFormData(prev => ({ ...prev, age: e.target.value }))}
                     placeholder="Age"
                   />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Sex</label>
+                  <select
+                    className="w-full h-8 text-xs px-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary bg-white"
+                    value={formData.sex}
+                    onChange={(e) => setFormData(prev => ({ ...prev, sex: e.target.value }))}
+                  >
+                    <option value="">Select Sex</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -348,27 +377,55 @@ export function EditReferralModal({ referral, isOpen, onClose, onSave }: EditRef
                   ))}
                 </select>
               </div>
+              {formData.treatment_service_destination === "Special Case" && (
               <div>
                 <label className="text-[10px] font-semibold text-green-500 mb-1 block">Special Case</label>
                 <Input
-                  className="h-8 text-xs border-green-300 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  className="h-8 text-xs border-green-300 focus:ring-green-500"
                   value={formData.special_case}
                   onChange={(e) => setFormData(prev => ({ ...prev, special_case: e.target.value }))}
-                  disabled={!selectedSectionDestination || (!selectedDisciplineDestination && selectedSectionDestination !== "prostho") || !formData.treatment_service_destination}
                   placeholder="Enter special case if applicable"
                 />
               </div>
+              )}
             </div>
 
             {/* Tentative Appointment */}
             <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 border border-gray-200">
               <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Tentative Appointment</label>
-              <Input
-                className="h-8 text-xs border-gray-300 focus:ring-secondary"
-                type="datetime-local"
-                value={formData.tentative_appointment_schedule}
-                onChange={(e) => setFormData(prev => ({ ...prev, tentative_appointment_schedule: e.target.value }))}
-              />
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  className="w-full sm:flex-1 h-9 text-xs border-2 border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary font-medium"
+                  type="date"
+                  value={formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[0] : ''}
+                  onChange={(e) => {
+                    const date = e.target.value;
+                    const time = formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[1]?.substring(0, 5) : '06:00';
+                    setFormData(prev => ({ ...prev, tentative_appointment_schedule: `${date}T${time}` }));
+                  }}
+                />
+                <select
+                  className="w-28 h-9 text-xs border-2 border-secondary rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-secondary font-bold text-white cursor-pointer hover:bg-secondary/90 transition-colors [&>option]:bg-white [&>option]:text-gray-700 [&>option]:font-semibold"
+                  value={formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[1]?.substring(0, 5) : '06:00'}
+                  onChange={(e) => {
+                    const date = formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[0] : new Date().toISOString().split('T')[0];
+                    setFormData(prev => ({ ...prev, tentative_appointment_schedule: `${date}T${e.target.value}` }));
+                  }}
+                >
+                  {Array.from({ length: 25 }, (_, i) => {
+                    const hour = Math.floor(i / 2) + 6;
+                    const minute = i % 2 === 0 ? '00' : '30';
+                    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+                    const period = hour >= 12 ? 'pm' : 'am';
+                    const value = `${String(hour).padStart(2, '0')}:${minute}`;
+                    return (
+                      <option key={value} value={value}>
+                        {displayHour}:{minute}{period}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
             </div>
 
             {/* Notes & Special Indications */}

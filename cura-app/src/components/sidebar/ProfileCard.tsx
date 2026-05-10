@@ -56,11 +56,12 @@ export function ProfileCard({
     department: department || profile?.clinical_department || "N/A",
     yearLevel: yearLevel || profile?.year_level || "N/A",
     batchName: profile?.batch_name || null,
+    subrole: (profile as any)?.subrole || null,
     avatarUrl: avatarUrl || profile?.avatar_url || "https://via.placeholder.com/100x100/c4956a/ffffff?text=U"
   }), [name, department, yearLevel, avatarUrl, profile]);
 
   // Destructure display data
-  const { name: displayName, department: displayDepartment, yearLevel: displayYearLevel, batchName: displayBatchName, avatarUrl: displayAvatarUrl } = displayData;
+  const { name: displayName, department: displayDepartment, yearLevel: displayYearLevel, batchName: displayBatchName, subrole: displaySubrole, avatarUrl: displayAvatarUrl } = displayData;
 
   if (loading) {
     return (
@@ -98,19 +99,31 @@ export function ProfileCard({
         <h2 className="text-sm font-bold text-secondary uppercase tracking-wide leading-tight">
           {displayName}
         </h2>
-        {displayBatchName && (
+        {displayBatchName && profile?.role !== 'clinical_admin' && profile?.role !== 'professor' && (
           <p className="text-[11px] text-accent font-semibold mt-0.5">{displayBatchName}</p>
         )}
 
+
         <div className="mt-3 space-y-1.5">
-          <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Shift</span>
-            <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">{displayDepartment}</span>
-          </div>
-          <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Year</span>
-            <span className="text-[11px] font-semibold text-secondary">{displayYearLevel}</span>
-          </div>
+          {profile?.role === 'professor' ? (
+            <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Role</span>
+              <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">{displaySubrole || "Professor"}</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">{profile?.role === 'clinical_admin' ? 'Section' : 'Shift'}</span>
+                <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">{displayDepartment}</span>
+              </div>
+              {profile?.role !== 'clinical_admin' && (
+                <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Year</span>
+                  <span className="text-[11px] font-semibold text-secondary">{displayYearLevel}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Quick Links */}
@@ -127,11 +140,11 @@ export function ProfileCard({
           >
             <Users className="h-4 w-4" />
           </Link>
-          {userRole === "professor" && (
+          {(userRole === "professor" || userRole === "clinical_admin") && (
             <Link
-              href="/professor"
+              href={userRole === "clinical_admin" ? "/clinical-admin/dashboard" : "/professor/dashboard"}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-secondary/30 text-secondary hover:bg-secondary/10 transition-colors"
-              title="Professor Dashboard"
+              title="Analytics Dashboard"
             >
               <BarChart3 className="h-4 w-4" />
             </Link>

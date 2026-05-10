@@ -14,6 +14,13 @@ import { RouteGuard } from "@/components/auth/RouteGuard";
 export default function EditRequestsPage() {
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCategory, setSearchCategory] = useState("medical_alert");
+
+  const handleHeaderSearch = useCallback((query: string, category: string) => {
+    setSearchQuery(query);
+    setSearchCategory(category);
+  }, []);
 
   useEffect(() => {
     loadReferrals();
@@ -21,7 +28,7 @@ export default function EditRequestsPage() {
 
   const loadReferrals = useCallback(async () => {
     try {
-      const data = await getReferrals();
+      const data = await getReferrals(false);
       setReferrals(data || []);
     } catch (error) {
       console.error("Error loading referrals:", error);
@@ -65,10 +72,25 @@ export default function EditRequestsPage() {
       (referral) =>
         referral.user_id === currentUserId &&
         referral.edit_request_status &&
-        (referral.edit_request_status === "approved" || referral.edit_request_status === "declined")
+        (referral.edit_request_status === "pending" || referral.edit_request_status === "approved" || referral.edit_request_status === "declined")
     ),
     [referrals, currentUserId]
   );
+
+  const searchedEditRequests = useMemo(() => {
+    if (!searchQuery.trim()) return editRequests;
+    const lowerQuery = searchQuery.toLowerCase();
+    return editRequests.filter(r => {
+      switch (searchCategory) {
+        case "medical_alert": return r.medical_alert?.toLowerCase().includes(lowerQuery);
+        case "origin": return r.clinical_section_origin?.toLowerCase().includes(lowerQuery) || r.clinical_discipline_origin?.toLowerCase().includes(lowerQuery) || r.treatment_service_origin?.toLowerCase().includes(lowerQuery);
+        case "destination": return r.clinical_section_destination?.toLowerCase().includes(lowerQuery) || r.clinical_discipline_destination?.toLowerCase().includes(lowerQuery) || r.treatment_service_destination?.toLowerCase().includes(lowerQuery);
+        case "created_by": return r.chart_number?.toLowerCase().includes(lowerQuery);
+        case "accepted_by": return r.accepted_by?.toLowerCase().includes(lowerQuery);
+        default: return true;
+      }
+    });
+  }, [editRequests, searchQuery, searchCategory]);
 
   return (
     <RouteGuard allowedRoles={["clinician"]}>
@@ -84,7 +106,7 @@ export default function EditRequestsPage() {
       
       {/* Content */}
       <div className="relative z-10 min-h-screen flex flex-col">
-        <Header />
+        <Header onSearch={handleHeaderSearch} />
 
         <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-4 lg:p-5 max-w-[1400px] mx-auto w-full">
           {/* Left Sidebar - Hidden on mobile, shown on lg+ */}
@@ -116,12 +138,12 @@ export default function EditRequestsPage() {
                 <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
                   Loading edit requests...
                 </div>
-              ) : editRequests.length === 0 ? (
+              ) : searchedEditRequests.length === 0 ? (
                 <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
-                  No edit requests yet.
+                  {searchQuery.trim() ? "No referrals match your search." : "No edit requests yet."}
                 </div>
               ) : (
-                editRequests.map((referral) => (
+                searchedEditRequests.map((referral) => (
                   <ReferralCard
                     key={referral.id}
                     id={referral.id}
@@ -139,11 +161,16 @@ export default function EditRequestsPage() {
                     acceptedAt={referral.accepted_at}
                     status={referral.status}
                     showAccept={false}
-                    showUpdate={false}
+                    showUpdate={true}
+                    age={referral.age ?? undefined}
+                    sex={referral.sex}
                     userId={referral.user_id}
                     editRequestPage={true}
                     editRequestReason={referral.edit_request_reason}
                     editRequestStatus={referral.edit_request_status}
+                    rereferRequestStatus={referral.rerefer_request_status}
+                    rereferRequestReason={referral.rerefer_request_reason}
+                    deletionRequestStatus={referral.deletion_request_status}
                     onUpdate={handleUpdateReferral}
                     onDelete={() => handleDeleteReferral(referral.id)}
                     onEditRequestSubmitted={loadReferrals}

@@ -135,16 +135,4 @@ export const filterTaxonomy: ClinicalSection[] = [
       },
     ],
   },
-  {
-    id: "any",
-    name: "Any Clinical Section",
-    shortName: "Any",
-    clinicalDisciplines: [
-      {
-        id: "any-others",
-        name: "Others",
-        treatmentServices: [],
-      },
-    ],
-  },
 ];

@@ -31,6 +31,7 @@ export function NewPatientReferralModal({
     chart_number: "2025-00001",
     treatment: "",
     age: undefined,
+    sex: "",
     medical_alert: "",
     clinical_section_origin: "",
     clinical_discipline_origin: "",
@@ -171,7 +172,8 @@ export function NewPatientReferralModal({
     const treatment = discipline?.treatmentServices.find(t => t.id === treatmentId);
     setFormData(prev => ({ 
       ...prev, 
-      treatment_service_destination: treatment?.name || ""
+      treatment_service_destination: treatment?.name || "",
+      special_case: treatment?.name === "Special Case" ? prev.special_case : "",
     }));
   };
 
@@ -210,7 +212,16 @@ export function NewPatientReferralModal({
     setError(null);
 
     try {
-      await createReferral(formData);
+      const saveData = { ...formData };
+      if (saveData.tentative_appointment_schedule) {
+        const d = new Date(saveData.tentative_appointment_schedule);
+        const tzOffset = -d.getTimezoneOffset();
+        const sign = tzOffset >= 0 ? '+' : '-';
+        const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+        const localISO = `${saveData.tentative_appointment_schedule.substring(0, 16)}:00${sign}${pad(tzOffset / 60)}:${pad(tzOffset % 60)}`;
+        saveData.tentative_appointment_schedule = localISO;
+      }
+      await createReferral(saveData);
       onSave?.();
       onOpenChange(false);
       // Reset form
@@ -298,6 +309,18 @@ export function NewPatientReferralModal({
                   value={formData.age || ""}
                   onChange={(e) => handleChange("age", parseInt(e.target.value) || 0)}
                 />
+              </div>
+              <div className="col-span-2">
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Sex</label>
+                <select
+                  className="w-full h-8 text-xs px-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary bg-white"
+                  value={formData.sex || ""}
+                  onChange={(e) => handleChange("sex", e.target.value)}
+                >
+                  <option value="">Select Sex</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
               </div>
             </div>
           </div>
@@ -391,16 +414,17 @@ export function NewPatientReferralModal({
                 ))}
               </select>
             </div>
+            {formData.treatment_service_destination === "Special Case" && (
             <div>
               <label className="text-[10px] font-semibold text-green-500 mb-1 block">Special Case</label>
               <Input
-                className="h-8 text-xs border-green-300 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                className="h-8 text-xs border-green-300 focus:ring-green-500"
                 value={formData.special_case}
                 onChange={(e) => handleChange("special_case", e.target.value)}
-                disabled={!destSection || (!destDiscipline && destSection !== "prostho") || !destTreatment}
                 placeholder="Enter special case if applicable"
               />
             </div>
+            )}
           </div>
 
           {/* Appointment */}

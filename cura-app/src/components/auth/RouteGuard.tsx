@@ -24,7 +24,9 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
 
     // Wrong role → redirect to their dashboard
     if (role && !allowedRoles.includes(role)) {
-      if (role === "professor") {
+      if (role === "clinical_admin") {
+        router.push("/clinical-admin");
+      } else if (role === "professor") {
         router.push("/professor");
       } else {
         router.push("/home");

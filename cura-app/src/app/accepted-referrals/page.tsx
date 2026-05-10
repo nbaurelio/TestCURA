@@ -15,6 +15,8 @@ import { RouteGuard } from "@/components/auth/RouteGuard";
 export default function AcceptedReferralsPage() {
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCategory, setSearchCategory] = useState("medical_alert");
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [acceptedReferralIds, setAcceptedReferralIds] = useState<Set<string>>(new Set());
   const [logsLoaded, setLogsLoaded] = useState(false);
@@ -70,9 +72,14 @@ export default function AcceptedReferralsPage() {
     }
   }, [loadReferrals]);
 
-  const handleUpdateReferral = (id: string) => {
-    console.log("Update referral:", id);
-  };
+  const handleUpdateReferral = useCallback(async (id: string, updates: Partial<Referral>) => {
+    try {
+      await updateReferral(id, updates as any);
+      loadReferrals();
+    } catch (error) {
+      console.error("Error updating referral:", error);
+    }
+  }, [loadReferrals]);
 
   const handleStatusChange = useCallback(async (id: string, newStatus: string) => {
     try {
@@ -83,7 +90,21 @@ export default function AcceptedReferralsPage() {
     }
   }, [loadReferrals]);
 
-  // Only show referrals accepted by the current user, identified by activity log
+  const handleSendBackToSystem = useCallback(async () => {
+    loadReferrals();
+  }, [loadReferrals]);
+
+  const blacklistedChartNumbers = useMemo(() =>
+    new Set(referrals.filter(r => r.referral_status?.toLowerCase() === "blacklisted" && r.chart_number).map(r => r.chart_number!)),
+  [referrals]);
+
+  const handleHeaderSearch = useCallback((query: string, category: string) => {
+    setSearchQuery(query);
+    setSearchCategory(category);
+  }, []);
+
+  // Only show referrals accepted by the current user, identified by activity log OR accepted_by_user_id
+  const currentUserId = getCurrentUserId();
   const acceptedReferrals = useMemo(() => {
     if (!logsLoaded) return [];
     return referrals.filter(
@@ -91,10 +112,27 @@ export default function AcceptedReferralsPage() {
         referral.is_featured &&
         referral.accepted_by &&
         referral.accepted_by !== "None" &&
-        acceptedReferralIds.has(referral.id) &&
-        (referral.status === "pending" || referral.status === "approved")
-    );
-  }, [referrals, acceptedReferralIds, logsLoaded]);
+        (acceptedReferralIds.has(referral.id) || referral.accepted_by_user_id === currentUserId) &&
+        (referral.status === "pending" || referral.status === "approved") &&
+        !["completed", "deferred", "blacklisted"].includes(referral.referral_status?.toLowerCase() ?? "") &&
+        !(referral as any).status_change_reason
+    ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [referrals, acceptedReferralIds, logsLoaded, currentUserId, blacklistedChartNumbers]);
+
+  const searchedReferrals = useMemo(() => {
+    if (!searchQuery.trim()) return acceptedReferrals;
+    const lowerQuery = searchQuery.toLowerCase();
+    return acceptedReferrals.filter(r => {
+      switch (searchCategory) {
+        case "medical_alert": return r.medical_alert?.toLowerCase().includes(lowerQuery);
+        case "origin": return r.clinical_section_origin?.toLowerCase().includes(lowerQuery) || r.clinical_discipline_origin?.toLowerCase().includes(lowerQuery) || r.treatment_service_origin?.toLowerCase().includes(lowerQuery);
+        case "destination": return r.clinical_section_destination?.toLowerCase().includes(lowerQuery) || r.clinical_discipline_destination?.toLowerCase().includes(lowerQuery) || r.treatment_service_destination?.toLowerCase().includes(lowerQuery);
+        case "created_by": return r.chart_number?.toLowerCase().includes(lowerQuery);
+        case "accepted_by": return r.accepted_by?.toLowerCase().includes(lowerQuery);
+        default: return true;
+      }
+    });
+  }, [acceptedReferrals, searchQuery, searchCategory]);
 
   return (
     <RouteGuard allowedRoles={["clinician"]}>
@@ -110,22 +148,22 @@ export default function AcceptedReferralsPage() {
       
       {/* Content */}
       <div className="relative z-10 min-h-screen flex flex-col">
-        <Header />
+        <Header onSearch={handleHeaderSearch} />
 
         <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-4 lg:p-5 max-w-[1400px] mx-auto w-full">
           {/* Left Sidebar - Hidden on mobile, shown on lg+ */}
-          <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4">
+          <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4 animate-enter">
             <ProfileCard />
             <SchedulePlanner />
           </aside>
 
           {/* Mobile Profile Card - Only shown on mobile */}
-          <div className="lg:hidden">
+          <div className="lg:hidden animate-enter">
             <ProfileCard />
           </div>
 
           {/* Main Content */}
-          <section className="flex-1">
+          <section className="flex-1 animate-enter-delay-1">
             {/* Back to Home Link */}
             <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline font-semibold">
               ← Back to Home
@@ -142,12 +180,12 @@ export default function AcceptedReferralsPage() {
                 <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
                   Loading accepted referrals...
                 </div>
-              ) : acceptedReferrals.length === 0 ? (
+              ) : searchedReferrals.length === 0 ? (
                 <div className="bg-white/60 backdrop-blur-sm rounded shadow border border-gray-300 p-8 text-center text-muted-foreground">
-                  No accepted referrals yet.
+                  {searchQuery.trim() ? "No referrals match your search." : "No accepted referrals yet."}
                 </div>
               ) : (
-                acceptedReferrals.map((referral) => (
+                searchedReferrals.map((referral) => (
                   <ReferralCard
                     key={referral.id}
                     id={referral.id}
@@ -166,13 +204,21 @@ export default function AcceptedReferralsPage() {
                     status={referral.status}
                     showAccept={false}
                     showUpdate={false}
+                    age={referral.age ?? undefined}
+                    sex={referral.sex}
                     userId={referral.user_id}
                     acceptedReferralsPage={true}
-                    referralStatus={referral.referral_status}
+                    referralStatus={referral.chart_number && blacklistedChartNumbers.has(referral.chart_number) ? "blacklisted" : referral.referral_status}
+                    referralStatusChangedAt={referral.referral_status_changed_at}
+                    acceptedByUserId={referral.accepted_by_user_id}
                     rereferRequestStatus={referral.rerefer_request_status}
-                    onStatusChange={handleStatusChange}
+                    rereferRequestReason={referral.rerefer_request_reason}
+                    onStatusChange={blacklistedChartNumbers.has(referral.chart_number || "") ? undefined : handleStatusChange}
+                    onUpdate={handleUpdateReferral}
                     onRerefer={() => loadReferrals()}
+                    onSendBackToSystem={handleSendBackToSystem}
                     onDelete={() => handleDeleteReferral(referral.id)}
+                    statusChangeReason={(referral as any).status_change_reason}
                   />
                 ))
               )}

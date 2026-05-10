@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle } from "lucide-react";
+import { ClipboardCheck } from "lucide-react";
 
 interface AcceptedReferralsButtonProps {
   count?: number;
@@ -10,12 +10,19 @@ interface AcceptedReferralsButtonProps {
 export function AcceptedReferralsButton({ count }: AcceptedReferralsButtonProps) {
   return (
     <Link href="/accepted-referrals" className="block relative">
-      <div className="bg-secondary text-white text-xs font-bold py-3 px-4 rounded shadow text-center uppercase tracking-wide cursor-pointer hover:bg-secondary/90 transition-colors flex items-center justify-center gap-2">
-        <CheckCircle className="h-3.5 w-3.5" />
-        ACCEPTED REFERRALS
+      <div className="bg-white border-2 border-secondary/20 rounded shadow-sm px-4 py-2 flex items-center gap-3 hover:border-secondary/50 hover:shadow-md transition-all duration-150 cursor-pointer group">
+        <div className="flex-shrink-0 h-9 w-9 rounded bg-secondary/10 flex items-center justify-center group-hover:bg-secondary/20 transition-colors">
+          <ClipboardCheck className="h-5 w-5 text-secondary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide leading-tight">Accepted Referrals</p>
+          {count !== undefined && (
+            <p className="text-lg font-bold text-secondary leading-tight">{count}</p>
+          )}
+        </div>
       </div>
       {count !== undefined && count > 0 && (
-        <span className="absolute -top-2 -right-2 min-w-[20px] h-5 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 shadow-md border-2 border-white">
+        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-1 shadow border-2 border-white">
           {count > 9 ? "9+" : count}
         </span>
       )}

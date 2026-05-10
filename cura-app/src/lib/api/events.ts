@@ -28,6 +28,10 @@ export interface EventFormData {
   patient_name?: string;
   color?: string;
   notes?: string;
+  medical_alert?: string;
+  is_favorite?: boolean;
+  status?: string;
+  source?: string;
 }
 
 export async function createEvent(data: EventFormData) {
@@ -48,6 +52,10 @@ export async function createEvent(data: EventFormData) {
       patient_name: data.patient_name,
       color: data.color,
       notes: data.notes,
+      medical_alert: data.medical_alert,
+      is_favorite: data.is_favorite || false,
+      status: data.status || 'scheduled',
+      source: data.source || 'manual',
     } as any)
     .select()
     .single();
@@ -120,6 +128,15 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
     throw error;
   }
 
+  // Log status change if status was updated
+  if (updates.status) {
+    await (supabase.from("event_status_history" as any) as any).insert({
+      event_id: id,
+      status: updates.status,
+      changed_by: mockUserId,
+    });
+  }
+
   // Clear cache after mutation
   clearEventsCache();
 
@@ -139,6 +156,80 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
   } as any);
 
   return data;
+}
+
+export async function getAllReferralEvents(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .or("source.eq.referral,title.like.Referral Appointment%")
+    .order("start_time", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+export async function getAdviseeEvents(adviseeIds: string[]): Promise<any[]> {
+  if (!adviseeIds || adviseeIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .or(`source.eq.referral,title.like.Referral Appointment%`)
+    .in("user_id", adviseeIds)
+    .order("start_time", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+export interface EventStatusChange {
+  status: string;
+  changed_at: string;
+  changed_by: string | null;
+}
+
+export async function getEventStatusHistory(eventId: string): Promise<EventStatusChange[]> {
+  const { data, error } = await (supabase.from("event_status_history" as any) as any)
+    .select("status, changed_at, changed_by")
+    .eq("event_id", eventId)
+    .order("changed_at", { ascending: true });
+
+  if (error) return [];
+  return data || [];
+}
+
+export async function getEventOverrides(professorId: string): Promise<Record<string, { color?: string; is_favorite?: boolean }>> {
+  const { data, error } = await supabase
+    .from("event_overrides" as any)
+    .select("event_id, color, is_favorite")
+    .eq("professor_id", professorId);
+
+  if (error) return {};
+
+  const map: Record<string, { color?: string; is_favorite?: boolean }> = {};
+  (data || []).forEach((row: any) => {
+    map[row.event_id] = { color: row.color, is_favorite: row.is_favorite };
+  });
+  return map;
+}
+
+export async function upsertEventOverride(professorId: string, eventId: string, overrides: { color?: string; is_favorite?: boolean }) {
+  const { error } = await (supabase.from("event_overrides" as any) as any)
+    .upsert({
+      professor_id: professorId,
+      event_id: eventId,
+      ...overrides,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "professor_id,event_id" });
+
+  if (error) throw error;
 }
 
 export async function deleteEvent(id: string) {

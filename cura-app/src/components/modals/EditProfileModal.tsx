@@ -29,6 +29,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
     year_level: "",
     clinical_department: "",
     batch_name: "",
+    subrole: "",
     email: "",
     avatar_url: "",
   });
@@ -84,6 +85,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
           year_level: data.year_level || "",
           clinical_department: data.clinical_department || "",
           batch_name: (data as any).batch_name || "",
+          subrole: (data as any).subrole || "",
           email: data.email,
           avatar_url: data.avatar_url || "",
         });
@@ -119,6 +121,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
         year_level: formData.year_level,
         clinical_department: formData.clinical_department,
         batch_name: formData.batch_name,
+        subrole: formData.subrole || null,
         email: formData.email,
         avatar_url: formData.avatar_url,
       } as any);
@@ -285,44 +288,74 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
                 <p className="text-xs font-semibold text-secondary bg-white border border-gray-200 rounded-lg px-2.5 py-1.5">{formData.last_name || "—"}</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            {profile?.role === "clinical_admin" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Discipline</label>
+                  <p className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 cursor-not-allowed">OD</p>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Section</label>
+                  <p className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 rounded-lg px-2.5 py-1.5 cursor-not-allowed">OM</p>
+                </div>
+              </div>
+            ) : profile?.role === "professor" ? (
               <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Year Level</label>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Role</label>
                 <select
                   className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-secondary bg-white"
-                  value={formData.year_level}
-                  onChange={(e) => setFormData({...formData, year_level: e.target.value})}
+                  value={formData.subrole}
+                  onChange={(e) => setFormData({...formData, subrole: e.target.value})}
                 >
-                  <option value="">Select year</option>
-                  <option value="5th yr">5th yr</option>
-                  <option value="6th yr">6th yr</option>
-                  <option value="Residency">Residency</option>
+                  <option value="">Select role</option>
+                  <option value="Clinical Chair">Clinical Chair</option>
+                  <option value="Discipline Head">Discipline Head</option>
+                  <option value="Department Head">Department Head</option>
+                  <option value="Professor">Professor</option>
                 </select>
               </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Year Level</label>
+                  <select
+                    className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-secondary bg-white"
+                    value={formData.year_level}
+                    onChange={(e) => setFormData({...formData, year_level: e.target.value})}
+                  >
+                    <option value="">Select year</option>
+                    <option value="5th yr">5th yr</option>
+                    <option value="6th yr">6th yr</option>
+                    <option value="Residency">Residency</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Shift</label>
+                  <select
+                    className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-secondary bg-white"
+                    value={formData.clinical_department}
+                    onChange={(e) => setFormData({...formData, clinical_department: e.target.value})}
+                  >
+                    <option value="">Select shift</option>
+                    <option value="Oral Medicine (OM)">Oral Medicine (OM)</option>
+                    <option value="Operative Dentistry (OP)">Operative Dentistry (OP)</option>
+                    <option value="Prosthodontics (Prostho)">Prosthodontics (Prostho)</option>
+                    <option value="Postgraduate Orthodontics (Ortho)">Postgraduate Orthodontics (Ortho)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            {profile?.role !== "clinical_admin" && profile?.role !== "professor" && (
               <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Shift</label>
-                <select
-                  className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-secondary bg-white"
-                  value={formData.clinical_department}
-                  onChange={(e) => setFormData({...formData, clinical_department: e.target.value})}
-                >
-                  <option value="">Select shift</option>
-                  <option value="Oral Medicine (OM)">Oral Medicine (OM)</option>
-                  <option value="Operative Dentistry (OP)">Operative Dentistry (OP)</option>
-                  <option value="Prosthodontics (Prostho)">Prosthodontics (Prostho)</option>
-                  <option value="Postgraduate Orthodontics (Ortho)">Postgraduate Orthodontics (Ortho)</option>
-                </select>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Batch Name</label>
+                <Input
+                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                  value={formData.batch_name}
+                  onChange={(e) => setFormData({...formData, batch_name: e.target.value})}
+                  placeholder="e.g. Batch 2025"
+                />
               </div>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Batch Name</label>
-              <Input
-                className="h-8 text-xs border-gray-300 focus:ring-secondary"
-                value={formData.batch_name}
-                onChange={(e) => setFormData({...formData, batch_name: e.target.value})}
-                placeholder="e.g. Batch 2025"
-              />
-            </div>
+            )}
           </div>
 
           {/* Account */}

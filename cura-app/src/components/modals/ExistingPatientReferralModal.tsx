@@ -26,6 +26,7 @@ const emptyForm = (): ReferralFormData => ({
   chart_number: "",
   treatment: "",
   age: undefined,
+  sex: "",
   medical_alert: "",
   clinical_section_origin: "",
   clinical_discipline_origin: "",
@@ -48,7 +49,7 @@ export function ExistingPatientReferralModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
-  const [lookupStatus, setLookupStatus] = useState<"idle" | "found" | "not_found">("idle");
+  const [lookupStatus, setLookupStatus] = useState<"idle" | "found" | "not_found" | "blacklisted">("idle");
 
   // Origin cascading filter state
   const [originSection, setOriginSection] = useState("");
@@ -73,6 +74,8 @@ export function ExistingPatientReferralModal({
     }
   }, [open]);
 
+  const isBlacklisted = lookupStatus === "blacklisted";
+
   const handleChange = (field: keyof ReferralFormData, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
@@ -90,22 +93,29 @@ export function ExistingPatientReferralModal({
       try {
         const referralsTable = supabase.from("referrals") as any;
         const { data, error: lookupError } = await referralsTable
-          .select("treatment, age, medical_alert, medical_history, notes_and_special_indications")
+          .select("treatment, age, sex, medical_alert, medical_history, notes_and_special_indications, referral_status")
           .eq("chart_number", value.trim())
-          .maybeSingle();
+          .order("created_at", { ascending: false });
 
         if (lookupError) throw lookupError;
 
-        if (data) {
-          setFormData(prev => ({
-            ...prev,
-            treatment: data.treatment ?? "",
-            age: data.age ?? undefined,
-            medical_alert: data.medical_alert ?? "",
-            medical_history: data.medical_history ?? "",
-            notes_and_special_indications: data.notes_and_special_indications ?? "",
-          }));
-          setLookupStatus("found");
+        if (data && data.length > 0) {
+          const isChartBlacklisted = data.some((r: any) => r.referral_status?.toLowerCase() === "blacklisted");
+          if (isChartBlacklisted) {
+            setLookupStatus("blacklisted");
+          } else {
+            const latest = data[0];
+            setFormData(prev => ({
+              ...prev,
+              treatment: latest.treatment ?? "",
+              age: latest.age ?? undefined,
+              sex: latest.sex ?? "",
+              medical_alert: latest.medical_alert ?? "",
+              medical_history: latest.medical_history ?? "",
+              notes_and_special_indications: latest.notes_and_special_indications ?? "",
+            }));
+            setLookupStatus("found");
+          }
         } else {
           setLookupStatus("not_found");
         }
@@ -214,7 +224,8 @@ export function ExistingPatientReferralModal({
     const treatment = discipline?.treatmentServices.find(t => t.id === treatmentId);
     setFormData(prev => ({
       ...prev,
-      treatment_service_destination: treatment?.name || ""
+      treatment_service_destination: treatment?.name || "",
+      special_case: treatment?.name === "Special Case" ? prev.special_case : "",
     }));
   };
 
@@ -250,11 +261,24 @@ export function ExistingPatientReferralModal({
       setError("Please enter a chart number.");
       return;
     }
+    if (isBlacklisted) {
+      setError("This chart number is blacklisted. A new referral cannot be created.");
+      return;
+    }
     setLoading(true);
     setError(null);
 
     try {
-      await createReferral(formData, true);
+      const saveData = { ...formData };
+      if (saveData.tentative_appointment_schedule) {
+        const d = new Date(saveData.tentative_appointment_schedule);
+        const tzOffset = -d.getTimezoneOffset();
+        const sign = tzOffset >= 0 ? '+' : '-';
+        const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+        const localISO = `${saveData.tentative_appointment_schedule.substring(0, 16)}:00${sign}${pad(tzOffset / 60)}:${pad(tzOffset % 60)}`;
+        saveData.tentative_appointment_schedule = localISO;
+      }
+      await createReferral(saveData, true);
       onSave?.();
       onOpenChange(false);
     } catch (err) {
@@ -305,6 +329,8 @@ export function ExistingPatientReferralModal({
                       ? "border-green-400 bg-green-50 focus:ring-green-500"
                       : lookupStatus === "not_found"
                       ? "border-red-400 focus:ring-red-500"
+                      : lookupStatus === "blacklisted"
+                      ? "border-gray-600 bg-gray-100 focus:ring-gray-500"
                       : "border-gray-300 focus:ring-secondary"
                   }`}
                   value={formData.chart_number}
@@ -318,6 +344,8 @@ export function ExistingPatientReferralModal({
                     <span className="text-green-500 font-bold">✓</span>
                   ) : lookupStatus === "not_found" ? (
                     <span className="text-red-400 font-bold">✗</span>
+                  ) : lookupStatus === "blacklisted" ? (
+                    <span className="text-gray-700 font-bold">⊘</span>
                   ) : (
                     <Search className="h-3 w-3 text-gray-400" />
                   )}
@@ -325,6 +353,12 @@ export function ExistingPatientReferralModal({
               </div>
               {lookupStatus === "not_found" && <p className="text-[10px] text-red-500 mt-1">Chart number not found.</p>}
               {lookupStatus === "found" && <p className="text-[10px] text-green-600 mt-1">Patient details loaded.</p>}
+              {lookupStatus === "blacklisted" && (
+                <div className="flex items-center gap-1.5 mt-1.5 bg-gray-800 text-white px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wide">
+                  <span>⊘</span>
+                  <span>This chart number is blacklisted — referral cannot be created</span>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -340,6 +374,19 @@ export function ExistingPatientReferralModal({
                   onChange={(e) => handleChange("age", parseInt(e.target.value) || 0)}
                   readOnly={lookupStatus !== "found"}
                 />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Sex</label>
+                <select
+                  className={`w-full h-8 text-xs px-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary bg-white ${lookupStatus !== "found" ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                  value={formData.sex || ""}
+                  onChange={(e) => handleChange("sex", e.target.value)}
+                  disabled={lookupStatus !== "found"}
+                >
+                  <option value="">Select Sex</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
               </div>
             </div>
           </div>
@@ -435,16 +482,17 @@ export function ExistingPatientReferralModal({
                 ))}
               </select>
             </div>
+            {formData.treatment_service_destination === "Special Case" && (
             <div>
               <label className="text-[10px] font-semibold text-green-500 mb-1 block">Special Case</label>
               <Input
-                className="h-8 text-xs border-green-300 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                className="h-8 text-xs border-green-300 focus:ring-green-500"
                 value={formData.special_case}
                 onChange={(e) => handleChange("special_case", e.target.value)}
-                disabled={!destSection || (!destDiscipline && destSection !== "prostho") || !destTreatment}
                 placeholder="Enter special case if applicable"
               />
             </div>
+            )}
           </div>
 
           {/* Appointment */}
@@ -501,7 +549,7 @@ export function ExistingPatientReferralModal({
             <Button
               type="button"
               onClick={handleSave}
-              disabled={loading}
+              disabled={loading || isBlacklisted}
               className="flex-1 bg-secondary hover:bg-secondary/90 text-white text-[10px] font-bold uppercase h-8 disabled:opacity-50"
             >
               {loading ? "SAVING..." : "SAVE"}
