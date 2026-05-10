@@ -15,6 +15,10 @@ export default function RootPage() {
       router.push("/login");
     } else if (role === "professor") {
       router.push("/professor");
+    } else if (role === "clinical_admin") {
+      router.push("/clinical-admin");
+    } else if (role === "system_admin") {
+      router.push("/system-admin");
     } else {
       router.push("/home");
     }
