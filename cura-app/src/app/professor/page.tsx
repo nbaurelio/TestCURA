@@ -50,7 +50,7 @@ export default function ProfessorDashboard() {
   const [isDeclineStatusChangeOpen, setIsDeclineStatusChangeOpen] = useState(false);
   const [statusChangeToAction, setStatusChangeToAction] = useState<string | null>(null);
   const [statusChangeTarget, setStatusChangeTarget] = useState<string>("deferred");
-  const [statusRequestFilter, setStatusRequestFilter] = useState<"ALL" | "EDIT" | "DELETION" | "REREFERRAL" | "DEFERRAL" | "BLACKLISTED">("ALL");
+  const [statusRequestFilter, setStatusRequestFilter] = useState<"ALL" | "EDIT" | "DELETION" | "REREFERRAL" | "DEFERRAL" | "BLACKLISTED" | "COMPLETED">("ALL");
   const [isStatusRequestFilterOpen, setIsStatusRequestFilterOpen] = useState(false);
   const statusRequestFilterRef = useRef<HTMLDivElement>(null);
   const [isDeclineRereferOpen, setIsDeclineRereferOpen] = useState(false);
@@ -63,13 +63,23 @@ export default function ProfessorDashboard() {
   const adviseeDropdownMobileRef = useRef<HTMLDivElement>(null);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [adviseeIds, setAdviseeIds] = useState<Set<string>>(new Set());
+  const [adviseeList, setAdviseeList] = useState<{ id: string; name: string }[]>([]);
   const [showOnlyAdvisees, setShowOnlyAdvisees] = useState(false);
   const [adviseeFilterMode, setAdviseeFilterMode] = useState<"ALL" | "CREATED_BY" | "ACCEPTED_BY">("ALL");
+  const [selectedAdviseeId, setSelectedAdviseeId] = useState<string | null>(null);
+  const [adviseeSearch, setAdviseeSearch] = useState("");
   const [adviseeDropdownOpen, setAdviseeDropdownOpen] = useState(false);
   const adviseeDropdownRef = useRef<HTMLDivElement>(null);
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCategory, setSearchCategory] = useState("medical_alert");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+  // Clinical Chair (a `professor` subrole) has clinic-wide oversight and can
+  // see / approve / decline EVERY student's request, not just those routed
+  // to them via `*_professor_ids`.
+  const [isClinicalChair, setIsClinicalChair] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -77,6 +87,8 @@ export default function ProfessorDashboard() {
       const insideDesktop = statusRef.current?.contains(target);
       const insideMobile = statusRefMobile.current?.contains(target);
       if (!insideDesktop && !insideMobile) setIsStatusOpen(false);
+      const insideSort = sortRef.current?.contains(target);
+      if (!insideSort) setIsSortOpen(false);
       const insideAdviseeDesktop = adviseeDropdownRef.current?.contains(target);
       const insideAdviseeMobile = adviseeDropdownMobileRef.current?.contains(target);
       if (!insideAdviseeDesktop && !insideAdviseeMobile) setAdviseeDropdownOpen(false);
@@ -97,10 +109,12 @@ export default function ProfessorDashboard() {
       const professorProfile = await getProfile(professorId);
       if (professorProfile) {
         setCurrentUserName(`${professorProfile.first_name} ${professorProfile.last_name}`.trim());
+        setIsClinicalChair(((professorProfile as any).subrole || "") === "Clinical Chair");
       }
       const advisees = await getAdvisees(professorId);
       const adviseeIdSet = new Set(advisees.map(a => a.id));
       setAdviseeIds(adviseeIdSet);
+      setAdviseeList(advisees.map(a => ({ id: a.id, name: `${a.first_name} ${a.last_name}`.trim() })).sort((a, b) => a.name.localeCompare(b.name)));
 
       const referralsData = await getReferrals(false); // Bypass cache for fresh data
       setReferrals(referralsData || []);
@@ -134,9 +148,24 @@ export default function ProfessorDashboard() {
     const currentProfessorId = getCurrentUserId();
     let filtered = referrals;
 
+    // My Advisees filter is only available on the ALL tab. Skip it on the
+    // request tabs (REREFERRALS, EDIT_REQUESTS, DELETION_REQUESTS,
+    // STATUS_REQUESTS) so those tabs always show the full routed feed.
     const isRequestTab = requestType !== "ALL";
     if (!isRequestTab && showOnlyAdvisees && adviseeIds.size > 0) {
-      if (adviseeFilterMode === "CREATED_BY") {
+      if (selectedAdviseeId) {
+        // Filter to a specific advisee, respecting the mode
+        if (adviseeFilterMode === "CREATED_BY") {
+          filtered = filtered.filter(ref => ref.user_id === selectedAdviseeId);
+        } else if (adviseeFilterMode === "ACCEPTED_BY") {
+          filtered = filtered.filter(ref => ref.accepted_by_user_id === selectedAdviseeId);
+        } else {
+          filtered = filtered.filter(ref =>
+            ref.user_id === selectedAdviseeId ||
+            ref.accepted_by_user_id === selectedAdviseeId
+          );
+        }
+      } else if (adviseeFilterMode === "CREATED_BY") {
         filtered = filtered.filter(ref => adviseeIds.has(ref.user_id));
       } else if (adviseeFilterMode === "ACCEPTED_BY") {
         filtered = filtered.filter(ref => ref.accepted_by_user_id && adviseeIds.has(ref.accepted_by_user_id));
@@ -158,54 +187,76 @@ export default function ProfessorDashboard() {
       });
     }
 
+    // Clinical Chair has clinic-wide oversight: skip the per-request
+    // routing filter (`*_professor_ids`) so they see every pending request.
+    const inRoutedIds = (ids: string[] | null | undefined) =>
+      isClinicalChair ? true : (ids?.includes(currentProfessorId) ?? true);
     if (requestType === "EDIT_REQUESTS") {
       filtered = filtered.filter(ref =>
         ref.edit_request_status === "pending" &&
         ref.edit_request_reason &&
-        (ref.edit_request_professor_ids?.includes(currentProfessorId) ?? true)
+        inRoutedIds(ref.edit_request_professor_ids)
       );
     }
     if (requestType === "REREFERRALS") {
       filtered = filtered.filter(ref =>
         ref.rerefer_request_status === "pending" &&
         ref.rerefer_request_reason &&
-        (ref.rerefer_request_professor_ids?.includes(currentProfessorId) ?? true)
+        inRoutedIds(ref.rerefer_request_professor_ids)
       );
     }
     if (requestType === "DELETION_REQUESTS") {
       filtered = filtered.filter(ref =>
         ref.deletion_request_status === "pending" &&
         ref.deletion_request_reason &&
-        (ref.deletion_request_professor_ids?.includes(currentProfessorId) ?? true)
+        inRoutedIds(ref.deletion_request_professor_ids)
       );
     }
     if (requestType === "STATUS_REQUESTS") {
       filtered = filtered.filter(ref => {
-        const isRerefer = ref.rerefer_request_status === "pending" && ref.rerefer_request_reason &&
-          (ref.rerefer_request_professor_ids?.includes(currentProfessorId) ?? true);
-        const isEdit = ref.edit_request_status === "pending" && ref.edit_request_reason &&
-          (ref.edit_request_professor_ids?.includes(currentProfessorId) ?? true);
-        const isDeletion = ref.deletion_request_status === "pending" && ref.deletion_request_reason &&
-          (ref.deletion_request_professor_ids?.includes(currentProfessorId) ?? true);
-        const rawReason: string = (ref as any).status_change_reason || "";
+        const isRerefer = ref.rerefer_request_status === "pending" && !!ref.rerefer_request_reason &&
+          inRoutedIds(ref.rerefer_request_professor_ids);
+        const isEdit = ref.edit_request_status === "pending" && !!ref.edit_request_reason &&
+          inRoutedIds(ref.edit_request_professor_ids);
+        const isDeletion = ref.deletion_request_status === "pending" && !!ref.deletion_request_reason &&
+          inRoutedIds(ref.deletion_request_professor_ids);
+        const rawReason: string = ref.status_change_reason || "";
         const scTarget = rawReason.includes("::") ? rawReason.split("::")[0] : "";
         const isDeferral = !!rawReason && scTarget === "deferred" &&
-          ((ref as any).status_change_professor_ids?.includes(currentProfessorId) ?? true);
+          inRoutedIds(ref.status_change_professor_ids);
         const isBlacklisted = !!rawReason && scTarget === "blacklisted" &&
-          ((ref as any).status_change_professor_ids?.includes(currentProfessorId) ?? true);
+          inRoutedIds(ref.status_change_professor_ids);
+        const isCompleted = !!rawReason && scTarget === "completed" &&
+          inRoutedIds(ref.status_change_professor_ids);
         const matchesFilter =
-          statusRequestFilter === "ALL" ? (isRerefer || isEdit || isDeletion || isDeferral || isBlacklisted) :
+          statusRequestFilter === "ALL" ? (isRerefer || isEdit || isDeletion || isDeferral || isBlacklisted || isCompleted) :
           statusRequestFilter === "REREFERRAL" ? isRerefer :
           statusRequestFilter === "EDIT" ? isEdit :
           statusRequestFilter === "DELETION" ? isDeletion :
           statusRequestFilter === "DEFERRAL" ? isDeferral :
-          statusRequestFilter === "BLACKLISTED" ? isBlacklisted : false;
+          statusRequestFilter === "BLACKLISTED" ? isBlacklisted :
+          statusRequestFilter === "COMPLETED" ? isCompleted : false;
         return matchesFilter;
       });
     }
 
-    return filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [referrals, activeStatus, requestType, adviseeIds, showOnlyAdvisees, adviseeFilterMode, statusRequestFilter]);
+    const getRequestTs = (r: any): number => {
+      if (requestType === "REREFERRALS" || (requestType === "STATUS_REQUESTS" && r.rerefer_request_status === "pending" && r.rerefer_request_reason))
+        return new Date(r.rerefer_requested_at || r.created_at).getTime();
+      if (requestType === "DELETION_REQUESTS" || (requestType === "STATUS_REQUESTS" && r.deletion_request_status === "pending" && r.deletion_request_reason))
+        return new Date(r.deletion_requested_at || r.created_at).getTime();
+      if (requestType === "EDIT_REQUESTS" || (requestType === "STATUS_REQUESTS" && r.edit_request_status === "pending" && r.edit_request_reason))
+        return new Date(r.edit_requested_at || r.created_at).getTime();
+      if (requestType === "STATUS_REQUESTS" && r.status_change_reason)
+        return new Date(r.status_change_requested_at || r.created_at).getTime();
+      return new Date(r.created_at).getTime();
+    };
+    return filtered.sort((a, b) => {
+      const aTs = getRequestTs(a);
+      const bTs = getRequestTs(b);
+      return sortOrder === "newest" ? bTs - aTs : aTs - bTs;
+    });
+  }, [referrals, activeStatus, requestType, adviseeIds, showOnlyAdvisees, adviseeFilterMode, selectedAdviseeId, statusRequestFilter, sortOrder, isClinicalChair]);
 
   const blacklistedChartNumbers = useMemo(() =>
     new Set(referrals.filter(r => r.referral_status?.toLowerCase() === "blacklisted" && r.chart_number).map(r => r.chart_number!)),
@@ -437,14 +488,62 @@ export default function ProfessorDashboard() {
   const confirmApproveStatusChange = async () => {
     if (!statusChangeToAction) return;
     try {
-      const { error } = await (supabase.from("referrals") as any)
-        .update({ referral_status: statusChangeTarget, status_change_reason: null, status_change_professor_ids: null } as any)
-        .eq("id", statusChangeToAction);
+      const professorId = getCurrentUserId();
+      const nowIso = new Date().toISOString();
+      // Persist the new status AND record WHO approved + WHEN, so the
+      // ViewDetailsModal's Status History attributes the Deferred / Blacklisted
+      // row to the approving professor rather than to the acceptor.
+      const { data: updated, error } = await (supabase.from("referrals") as any)
+        .update({
+          referral_status: statusChangeTarget,
+          referral_status_changed_at: nowIso,
+          status_change_reason: null,
+          status_change_professor_ids: null,
+          status_change_approved_by: professorId,
+        } as any)
+        .eq("id", statusChangeToAction)
+        .select()
+        .single();
       if (error) {
         console.error("Supabase error approving status change:", error);
         alert("Failed to approve: " + error.message);
         return;
       }
+
+      // Write a CHANGE_REFERRAL_STATUS activity log so getReferralStatusHistory
+      // returns this transition with `user_id = professorId`. Without this log
+      // the modal falls back to synthesizing the row from accepted_by_user_id
+      // (the acceptor), which mis-credits the change.
+      try {
+        await (supabase.from("activity_logs") as any).insert({
+          user_id: professorId,
+          action: "CHANGE_REFERRAL_STATUS",
+          description: `YOU APPROVED STATUS CHANGE TO ${statusChangeTarget.toUpperCase()} - Chart: ${updated?.chart_number || "N/A"}`,
+          metadata: JSON.stringify({
+            referral_id: statusChangeToAction,
+            chart_number: updated?.chart_number,
+            new_status: statusChangeTarget,
+            approved_via: "status_change_request",
+          }),
+        } as any);
+      } catch (logErr) {
+        console.warn("Could not write status change activity log:", logErr);
+      }
+
+      // When the approved target is "completed", flip every referral-linked
+      // calendar event for this chart number to "treatment_rendered" so the
+      // schedule reflects the appointment was carried out.
+      if (statusChangeTarget === "completed") {
+        try {
+          const { markReferralEventsTreatmentRendered } = await import("@/lib/api/events");
+          await markReferralEventsTreatmentRendered(updated?.chart_number || null);
+        } catch (evErr) {
+          console.warn("Could not mark referral events as treatment_rendered:", evErr);
+        }
+      }
+
+      const { clearReferralsCache } = await import("@/lib/api/referrals");
+      clearReferralsCache();
       setIsApproveStatusChangeOpen(false);
       setStatusChangeToAction(null);
       await loadData();
@@ -457,10 +556,50 @@ export default function ProfessorDashboard() {
 
   const confirmDeclineStatusChange = async () => {
     if (!statusChangeToAction) return;
+    if (!declineReason.trim()) return;
     try {
+      const professorId = getCurrentUserId();
+      // Capture the requested target before nulling `status_change_reason`,
+      // so the decline log can record what the clinician was asking for.
+      const { data: refBefore } = await (supabase.from("referrals") as any)
+        .select("chart_number, status_change_reason")
+        .eq("id", statusChangeToAction)
+        .single();
+      const reasonStr: string = (refBefore as any)?.status_change_reason || "";
+      const declinedTarget = reasonStr.includes("::") ? reasonStr.split("::")[0] : statusChangeTarget;
+
       await (supabase.from("referrals") as any)
-        .update({ referral_status: "ongoing", status_change_reason: null, status_change_professor_ids: null } as any)
+        .update({
+          referral_status: "ongoing",
+          status_change_reason: null,
+          status_change_professor_ids: null,
+          status_change_decline_reason: declineReason.trim(),
+        } as any)
         .eq("id", statusChangeToAction);
+
+      // Mirror the approve flow: write a CHANGE_REFERRAL_STATUS log so the
+      // decline shows up in the professor's logs view alongside approvals.
+      // `declined_via` + `declined_target` let the renderer phrase it as
+      // "<Professor> declined status change to <target>".
+      try {
+        await (supabase.from("activity_logs") as any).insert({
+          user_id: professorId,
+          action: "CHANGE_REFERRAL_STATUS",
+          description: `DECLINED STATUS CHANGE TO ${declinedTarget.toUpperCase()} - Chart: ${(refBefore as any)?.chart_number || "N/A"}`,
+          metadata: JSON.stringify({
+            referral_id: statusChangeToAction,
+            chart_number: (refBefore as any)?.chart_number,
+            declined_target: declinedTarget,
+            decline_reason: declineReason.trim(),
+            declined_via: "status_change_request",
+          }),
+        } as any);
+      } catch (logErr) {
+        console.warn("Could not write status change decline log:", logErr);
+      }
+
+      const { clearReferralsCache } = await import("@/lib/api/referrals");
+      clearReferralsCache();
       setIsDeclineStatusChangeOpen(false);
       setStatusChangeToAction(null);
       setDeclineReason("");
@@ -473,10 +612,11 @@ export default function ProfessorDashboard() {
 
   const statusTabs: ReferralStatus[] = ["ALL", "AVAILABLE", "ONGOING", "COMPLETED", "DEFERRED", "BLACKLISTED"];
 
-  // Only count requests from this professor's advisees (fall back to all if no advisees configured)
+  // Only count requests from this professor's advisees (fall back to all if no advisees configured).
+  // Clinical Chair always sees clinic-wide counts.
   const adviseeReferrals = useMemo(() =>
-    adviseeIds.size > 0 ? referrals.filter(ref => adviseeIds.has(ref.user_id)) : referrals,
-    [referrals, adviseeIds]
+    isClinicalChair ? referrals : (adviseeIds.size > 0 ? referrals.filter(ref => adviseeIds.has(ref.user_id)) : referrals),
+    [referrals, adviseeIds, isClinicalChair]
   );
   const rereferralCount = useMemo(() =>
     adviseeReferrals.filter(ref => ref.rerefer_request_status === "pending" && ref.rerefer_request_reason).length,
@@ -491,13 +631,26 @@ export default function ProfessorDashboard() {
     [adviseeReferrals]
   );
   const currentProfessorIdForCount = getCurrentUserId();
-  const statusRequestCount = useMemo(() =>
-    referrals.filter(ref =>
-      (ref as any).status_change_reason &&
-      ((ref as any).status_change_professor_ids?.includes(currentProfessorIdForCount) ?? true)
-    ).length,
-    [referrals, currentProfessorIdForCount]
-  );
+  // Status Requests badge: count UNIQUE referrals that surface in the
+  // STATUS_REQUESTS tab — i.e. any pending Rereferral, Edit, Deletion,
+  // Deferral or Blacklist request that's routed to this professor (or
+  // anything, if Clinical Chair). Mirrors the filter logic in
+  // `filteredReferrals` so the badge always equals the tab's row count.
+  const statusRequestCount = useMemo(() => {
+    const inRouted = (ids: string[] | null | undefined) =>
+      isClinicalChair ? true : (ids?.includes(currentProfessorIdForCount) ?? true);
+    return referrals.filter(ref => {
+      const isRerefer = ref.rerefer_request_status === "pending" && !!ref.rerefer_request_reason &&
+        inRouted(ref.rerefer_request_professor_ids);
+      const isEdit = ref.edit_request_status === "pending" && !!ref.edit_request_reason &&
+        inRouted(ref.edit_request_professor_ids);
+      const isDeletion = (ref as any).deletion_request_status === "pending" && !!(ref as any).deletion_request_reason &&
+        inRouted((ref as any).deletion_request_professor_ids);
+      const isStatusChange = !!ref.status_change_reason &&
+        inRouted(ref.status_change_professor_ids);
+      return isRerefer || isEdit || isDeletion || isStatusChange;
+    }).length;
+  }, [referrals, currentProfessorIdForCount, isClinicalChair]);
   const requestCounts: Record<RequestType, number | undefined> = {
     ALL: undefined,
     REREFERRALS: rereferralCount,
@@ -505,6 +658,43 @@ export default function ProfessorDashboard() {
     DELETION_REQUESTS: deletionRequestCount,
     STATUS_REQUESTS: statusRequestCount,
   };
+
+  // Per-sub-filter counts rendered as red circle badges inside the Status
+  // Requests dropdown so the professor can see at a glance which sub-filter
+  // has pending work (mirrors the clinical admin view). Deferral vs
+  // Blacklist is derived from the "<target>::<reason>" prefix stored in
+  // `status_change_reason`. Only referrals routed to this professor via
+  // `status_change_professor_ids` are counted.
+  const statusRequestSubCounts = useMemo(() => {
+    const mine = referrals.filter(ref =>
+      ref.status_change_reason &&
+      (isClinicalChair || (ref.status_change_professor_ids?.includes(currentProfessorIdForCount) ?? true))
+    );
+    const deferralCount = mine.filter(ref => {
+      const r = ref.status_change_reason;
+      return !!r && (r.startsWith("deferred::") || !r.includes("::"));
+    }).length;
+    const blacklistCount = mine.filter(ref => {
+      const r = ref.status_change_reason;
+      return !!r && r.startsWith("blacklisted::");
+    }).length;
+    const completedCount = mine.filter(ref => {
+      const r = ref.status_change_reason;
+      return !!r && r.startsWith("completed::");
+    }).length;
+    return {
+      // `statusRequestCount` already counts unique referrals across all six
+      // request types using the same routing filter as the tab, so it IS
+      // the accurate total — no double-summing needed.
+      ALL: statusRequestCount,
+      REREFERRAL: rereferralCount,
+      EDIT: editRequestCount,
+      DELETION: deletionRequestCount,
+      DEFERRAL: deferralCount,
+      BLACKLISTED: blacklistCount,
+      COMPLETED: completedCount,
+    } as Record<"ALL" | "REREFERRAL" | "EDIT" | "DELETION" | "DEFERRAL" | "BLACKLISTED" | "COMPLETED", number>;
+  }, [referrals, currentProfessorIdForCount, rereferralCount, editRequestCount, deletionRequestCount, statusRequestCount, isClinicalChair]);
 
   return (
     <RouteGuard allowedRoles={["professor"]}>
@@ -579,7 +769,7 @@ export default function ProfessorDashboard() {
                   )}
                 </div>
 
-                {/* Status Requests tab - acts as dropdown filter */}
+                {/* Requests Status tab - acts as dropdown filter */}
                 <div ref={statusRequestFilterRef} className="relative">
                   <button
                     onClick={() => { setRequestType("STATUS_REQUESTS"); setIsStatusOpen(false); setIsStatusRequestFilterOpen(v => !v); }}
@@ -589,12 +779,12 @@ export default function ProfessorDashboard() {
                         : "bg-white text-gray-700 hover:bg-muted border-2 border-gray-300"
                     }`}
                   >
-                    <span>Status Requests</span>
+                    <span>Request Status</span>
                     {requestType === "STATUS_REQUESTS" && (
                       <>
                         {statusRequestFilter !== "ALL" && (
                           <span className="bg-white/20 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">
-                            {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : "Blacklisted"}
+                            {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : statusRequestFilter === "COMPLETED" ? "Completed" : "Blacklisted"}
                           </span>
                         )}
                         <ChevronDown className={`h-3 w-3 transition-transform ${isStatusRequestFilterOpen ? "rotate-180" : ""}`} />
@@ -608,64 +798,133 @@ export default function ProfessorDashboard() {
                   </button>
                   {requestType === "STATUS_REQUESTS" && isStatusRequestFilterOpen && (
                     <div className="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                      {(["ALL", "REREFERRAL", "EDIT", "DELETION", "DEFERRAL", "BLACKLISTED"] as const).map(f => (
-                        <button
-                          key={f}
-                          type="button"
-                          onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
-                            statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"
-                          }`}
-                        >
-                          {f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : "Blacklisted"}
-                        </button>
-                      ))}
+                      {(["ALL", "REREFERRAL", "EDIT", "DELETION", "COMPLETED", "DEFERRAL", "BLACKLISTED"] as const).map(f => {
+                        const count = statusRequestSubCounts[f];
+                        return (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
+                            className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold transition-colors ${
+                              statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"
+                            }`}
+                          >
+                            <span>{f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : f === "COMPLETED" ? "Completion" : "Blacklisted"}</span>
+                            {count > 0 && (
+                              <span className={`min-w-[18px] h-[18px] flex items-center justify-center text-white text-[9px] font-bold rounded-full px-1 shadow ${statusRequestFilter === f ? "bg-red-400 border border-white" : "bg-red-500"}`}>{count > 9 ? "9+" : count}</span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                {/* My Advisees dropdown - only on ALL tab */}
-                {requestType === "ALL" && adviseeIds.size > 0 && (
-                  <div ref={adviseeDropdownRef} className="relative ml-auto">
+                {/* Sort dropdown - visible on both ALL and STATUS_REQUESTS tabs */}
+                {(requestType === "ALL" || requestType === "STATUS_REQUESTS") && (
+                  <div ref={sortRef} className="relative ml-auto">
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowOnlyAdvisees(true);
-                        setAdviseeDropdownOpen(prev => !prev);
-                      }}
+                      onClick={() => setIsSortOpen(prev => !prev)}
+                      className={`flex items-center gap-2 px-4 h-[38px] rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all border-2 whitespace-nowrap ${
+                        isSortOpen
+                          ? "bg-accent text-white border-accent shadow"
+                          : "bg-white text-gray-700 border-gray-300 hover:border-accent hover:text-accent"
+                      }`}
+                    >
+                      <span>Sort By: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {isSortOpen && (
+                      <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
+                        {(["newest", "oldest"] as const).map(opt => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
+                              sortOrder === opt
+                                ? "bg-accent text-white"
+                                : "text-gray-700 hover:bg-gray-100"
+                            }`}
+                          >
+                            {opt === "newest" ? "Newest" : "Oldest"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* My Advisees dropdown - only on ALL tab */}
+                {requestType === "ALL" && adviseeIds.size > 0 && (
+                  <div ref={adviseeDropdownRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setAdviseeDropdownOpen(prev => !prev)}
                       className={`flex items-center gap-2 px-4 h-[38px] rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all border-2 whitespace-nowrap ${
                         showOnlyAdvisees
                           ? "bg-accent text-white border-accent shadow"
                           : "bg-white text-gray-700 border-gray-300 hover:border-accent hover:text-accent"
                       }`}
                     >
-                      <span>{showOnlyAdvisees && adviseeFilterMode !== "ALL" ? (adviseeFilterMode === "CREATED_BY" ? "Created By" : "Accepted By") : "My Advisees"}</span>
+                      <span>{showOnlyAdvisees && selectedAdviseeId ? (adviseeList.find(a => a.id === selectedAdviseeId)?.name ?? "My Advisees") : "My Advisees"}</span>
                       <ChevronDown className={`h-3 w-3 transition-transform ${adviseeDropdownOpen ? "rotate-180" : ""}`} />
                     </button>
                     {adviseeDropdownOpen && (
-                      <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                        {(["ALL", "CREATED_BY", "ACCEPTED_BY"] as const).map(mode => (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => {
-                              if (mode === "ALL" && adviseeFilterMode === "ALL" && showOnlyAdvisees) {
-                                setShowOnlyAdvisees(false);
-                              } else {
-                                setShowOnlyAdvisees(true);
-                                setAdviseeFilterMode(mode);
-                              }
-                              setAdviseeDropdownOpen(false);
-                            }}
-                            className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
-                              showOnlyAdvisees && adviseeFilterMode === mode
-                                ? "bg-accent text-white"
-                                : "text-gray-700 hover:bg-gray-100"
-                            }`}
+                      <div className="absolute right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                        {/* Search + filter row */}
+                        <div className="flex items-center gap-1 p-2 border-b border-gray-100">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={adviseeSearch}
+                            onChange={e => setAdviseeSearch(e.target.value)}
+                            placeholder="Search advisee..."
+                            className="flex-1 min-w-0 px-3 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:border-accent"
+                          />
+                          <select
+                            value={adviseeFilterMode}
+                            onChange={e => setAdviseeFilterMode(e.target.value as "ALL" | "CREATED_BY" | "ACCEPTED_BY")}
+                            className="shrink-0 px-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:border-accent bg-white text-gray-700 font-semibold cursor-pointer"
                           >
-                            {mode === "ALL" ? "All" : mode === "CREATED_BY" ? "Created By" : "Accepted By"}
-                          </button>
-                        ))}
+                            <option value="ALL">All</option>
+                            <option value="CREATED_BY">Created By</option>
+                            <option value="ACCEPTED_BY">Accepted By</option>
+                          </select>
+                        </div>
+                        {/* Show All option */}
+                        <button
+                          type="button"
+                          onClick={() => { setShowOnlyAdvisees(false); setSelectedAdviseeId(null); setAdviseeSearch(""); setAdviseeDropdownOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors border-b border-gray-100 ${
+                            !showOnlyAdvisees ? "bg-accent text-white" : "text-gray-700 hover:bg-gray-100"
+                          }`}
+                        >
+                          All Advisees
+                        </button>
+                        {/* Advisee list */}
+                        <div className="max-h-52 overflow-y-auto">
+                          {adviseeList
+                            .filter(a => a.name.toLowerCase().includes(adviseeSearch.toLowerCase()))
+                            .map(a => (
+                              <button
+                                key={a.id}
+                                type="button"
+                                onClick={() => { setShowOnlyAdvisees(true); setSelectedAdviseeId(a.id); setAdviseeSearch(""); setAdviseeDropdownOpen(false); }}
+                                className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors ${
+                                  showOnlyAdvisees && selectedAdviseeId === a.id
+                                    ? "bg-accent text-white"
+                                    : "text-gray-700 hover:bg-gray-100"
+                                }`}
+                              >
+                                {a.name}
+                              </button>
+                            ))}
+                          {adviseeList.filter(a => a.name.toLowerCase().includes(adviseeSearch.toLowerCase())).length === 0 && (
+                            <p className="px-3 py-3 text-xs text-gray-400 text-center">No advisees found</p>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -718,7 +977,7 @@ export default function ProfessorDashboard() {
                     )}
                   </div>
 
-                  {/* Status Requests tab - acts as dropdown filter (mobile) */}
+                  {/* Requests Status tab - acts as dropdown filter (mobile) */}
                   <div className="relative">
                     <button
                       onClick={() => { setRequestType("STATUS_REQUESTS"); setIsStatusOpen(false); setIsStatusRequestFilterOpen(v => !v); }}
@@ -728,12 +987,12 @@ export default function ProfessorDashboard() {
                           : "bg-white text-gray-700 hover:bg-muted border-2 border-gray-300"
                       }`}
                     >
-                      <span>Status Requests</span>
+                      <span>Request Status</span>
                       {requestType === "STATUS_REQUESTS" && (
                         <>
                           {statusRequestFilter !== "ALL" && (
                             <span className="bg-white/20 text-white text-[8px] px-1 py-0.5 rounded font-bold">
-                              {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : "Blacklisted"}
+                              {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : statusRequestFilter === "COMPLETED" ? "Completed" : "Blacklisted"}
                             </span>
                           )}
                           <ChevronDown className={`h-3 w-3 transition-transform ${isStatusRequestFilterOpen ? "rotate-180" : ""}`} />
@@ -747,18 +1006,24 @@ export default function ProfessorDashboard() {
                     </button>
                     {requestType === "STATUS_REQUESTS" && isStatusRequestFilterOpen && (
                       <div className="absolute left-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                        {(["ALL", "REREFERRAL", "EDIT", "DELETION", "DEFERRAL", "BLACKLISTED"] as const).map(f => (
+                        {(["ALL", "REREFERRAL", "EDIT", "DELETION", "COMPLETED", "DEFERRAL", "BLACKLISTED"] as const).map(f => {
+                          const count = statusRequestSubCounts[f];
+                          return (
                           <button
                             key={f}
                             type="button"
                             onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
-                            className={`w-full text-left px-3 py-2 text-[10px] font-semibold transition-colors ${
+                            className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-[10px] font-semibold transition-colors ${
                               statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"
                             }`}
                           >
-                            {f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : "Blacklisted"}
+                            <span>{f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : f === "COMPLETED" ? "Completion" : "Blacklisted"}</span>
+                            {count > 0 && (
+                              <span className={`min-w-[16px] h-[16px] flex items-center justify-center text-white text-[9px] font-bold rounded-full px-1 shadow ${statusRequestFilter === f ? "bg-red-400 border border-white" : "bg-red-500"}`}>{count > 9 ? "9+" : count}</span>
+                            )}
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -769,37 +1034,101 @@ export default function ProfessorDashboard() {
                   <div ref={adviseeDropdownMobileRef} className="relative w-full">
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowOnlyAdvisees(true);
-                        setAdviseeDropdownOpen(prev => !prev);
-                      }}
+                      onClick={() => setAdviseeDropdownOpen(prev => !prev)}
                       className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all border-2 ${
                         showOnlyAdvisees
                           ? "bg-accent text-white border-accent shadow"
                           : "bg-white text-gray-700 border-gray-300 hover:border-accent hover:text-accent"
                       }`}
                     >
-                      <span>{showOnlyAdvisees && adviseeFilterMode !== "ALL" ? (adviseeFilterMode === "CREATED_BY" ? "Created By" : "Accepted By") : "My Advisees"}</span>
+                      <span>{showOnlyAdvisees && selectedAdviseeId ? (adviseeList.find(a => a.id === selectedAdviseeId)?.name ?? "My Advisees") : "My Advisees"}</span>
                       <ChevronDown className={`h-3 w-3 transition-transform ${adviseeDropdownOpen ? "rotate-180" : ""}`} />
                     </button>
                     {adviseeDropdownOpen && (
+                      <div className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                        <div className="flex items-center gap-1 p-2 border-b border-gray-100">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={adviseeSearch}
+                            onChange={e => setAdviseeSearch(e.target.value)}
+                            placeholder="Search advisee..."
+                            className="flex-1 min-w-0 px-3 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:border-accent"
+                          />
+                          <select
+                            value={adviseeFilterMode}
+                            onChange={e => setAdviseeFilterMode(e.target.value as "ALL" | "CREATED_BY" | "ACCEPTED_BY")}
+                            className="shrink-0 px-2 py-1.5 text-xs border border-gray-200 rounded-lg outline-none focus:border-accent bg-white text-gray-700 font-semibold cursor-pointer"
+                          >
+                            <option value="ALL">All</option>
+                            <option value="CREATED_BY">Created By</option>
+                            <option value="ACCEPTED_BY">Accepted By</option>
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setShowOnlyAdvisees(false); setSelectedAdviseeId(null); setAdviseeSearch(""); setAdviseeDropdownOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors border-b border-gray-100 ${
+                            !showOnlyAdvisees ? "bg-accent text-white" : "text-gray-700 hover:bg-gray-100"
+                          }`}
+                        >
+                          All Advisees
+                        </button>
+                        <div className="max-h-52 overflow-y-auto">
+                          {adviseeList
+                            .filter(a => a.name.toLowerCase().includes(adviseeSearch.toLowerCase()))
+                            .map(a => (
+                              <button
+                                key={a.id}
+                                type="button"
+                                onClick={() => { setShowOnlyAdvisees(true); setSelectedAdviseeId(a.id); setAdviseeSearch(""); setAdviseeDropdownOpen(false); }}
+                                className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors ${
+                                  showOnlyAdvisees && selectedAdviseeId === a.id
+                                    ? "bg-accent text-white"
+                                    : "text-gray-700 hover:bg-gray-100"
+                                }`}
+                              >
+                                {a.name}
+                              </button>
+                            ))}
+                          {adviseeList.filter(a => a.name.toLowerCase().includes(adviseeSearch.toLowerCase())).length === 0 && (
+                            <p className="px-3 py-3 text-xs text-gray-400 text-center">No advisees found</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sort dropdown — mobile */}
+                {(requestType === "ALL" || requestType === "STATUS_REQUESTS") && (
+                  <div className="relative w-full">
+                    <button
+                      type="button"
+                      onClick={() => setIsSortOpen(prev => !prev)}
+                      className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all border-2 ${
+                        isSortOpen
+                          ? "bg-accent text-white border-accent shadow"
+                          : "bg-white text-gray-700 border-gray-300 hover:border-accent hover:text-accent"
+                      }`}
+                    >
+                      <span>Sort By: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {isSortOpen && (
                       <div className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                        {(["ALL", "CREATED_BY", "ACCEPTED_BY"] as const).map(mode => (
+                        {(["newest", "oldest"] as const).map(opt => (
                           <button
-                            key={mode}
+                            key={opt}
                             type="button"
-                            onClick={() => {
-                              setShowOnlyAdvisees(true);
-                              setAdviseeFilterMode(mode);
-                              setAdviseeDropdownOpen(false);
-                            }}
+                            onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
                             className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
-                              showOnlyAdvisees && adviseeFilterMode === mode
+                              sortOrder === opt
                                 ? "bg-accent text-white"
                                 : "text-gray-700 hover:bg-gray-100"
                             }`}
                           >
-                            {mode === "ALL" ? "All" : mode === "CREATED_BY" ? "Created By" : "Accepted By"}
+                            {opt === "newest" ? "Newest" : "Oldest"}
                           </button>
                         ))}
                       </div>
@@ -910,10 +1239,10 @@ export default function ProfessorDashboard() {
                             <tr className="bg-secondary text-white">
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[11%] rounded-tl-lg">Request Type</th>
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[9%]">Chart No.</th>
-                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[16%]">Treatment</th>
-                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[8%]">Special</th>
+                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[13%]">Treatment</th>
+                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[12%]">Special</th>
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[12%]">Requested By</th>
-                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[22%]">Reason</th>
+                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[21%]">Reason</th>
                               <th className="px-3 py-3 text-center font-bold uppercase tracking-wide w-[16%]">Actions</th>
                               <th className="px-3 py-3 text-center font-bold uppercase tracking-wide w-[6%] rounded-tr-lg"></th>
                             </tr>
@@ -923,22 +1252,22 @@ export default function ProfessorDashboard() {
                               const isRerefer = referral.rerefer_request_status === "pending" && !!referral.rerefer_request_reason;
                               const isEdit = referral.edit_request_status === "pending" && !!referral.edit_request_reason;
                               const isDeletion = referral.deletion_request_status === "pending" && !!referral.deletion_request_reason;
-                              const isStatusChange = !!(referral as any).status_change_reason;
-                              const rawStatusChangeReason: string = (referral as any).status_change_reason || "";
+                              const isStatusChange = !!referral.status_change_reason;
+                              const rawStatusChangeReason: string = referral.status_change_reason || "";
                               const statusChangeParts = rawStatusChangeReason.includes("::") ? rawStatusChangeReason.split("::") : ["deferred", rawStatusChangeReason];
                               const statusChangeTargetVal = statusChangeParts[0];
                               const statusChangeReasonClean = statusChangeParts.slice(1).join("::");
-                              const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : "Blacklist") : "Unknown";
-                              const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : "bg-red-100 text-red-700";
+                              const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : statusChangeTargetVal === "completed" ? "Completion" : "Blacklist") : "Unknown";
+                              const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : statusChangeTargetVal === "completed" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
                               const reason = isRerefer ? referral.rerefer_request_reason : isEdit ? referral.edit_request_reason : isDeletion ? referral.deletion_request_reason : statusChangeReasonClean;
-                              const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : "bg-orange-50 border-orange-500";
+                              const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : statusChangeTargetVal === "completed" ? "bg-green-50 border-green-500" : "bg-orange-50 border-orange-500";
                               const requesterId = isRerefer ? referral.rerefer_requested_by : isDeletion ? referral.deletion_requested_by : referral.accepted_by_user_id;
                               return (
                                 <tr key={`${referral.id}-${reqType}`} className={`border-b border-[#87c4d8]/30 hover:bg-[#87c4d8]/10 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-[#87c4d8]/5"}`}>
                                   <td className="px-3 py-3"><span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${reqColor}`}>{reqType}</span></td>
                                   <td className="px-3 py-3 font-semibold text-secondary break-words">{referral.chart_number}</td>
                                   <td className="px-3 py-3 text-gray-700 break-words">{referral.treatment_service_destination || "—"}</td>
-                                  <td className="px-3 py-3">{referral.special_case ? <span className="inline-block bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded">{referral.special_case}</span> : <span className="text-gray-400">—</span>}</td>
+                                  <td className="px-3 py-3 overflow-hidden">{referral.special_case ? <span className="inline-block bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded whitespace-normal break-words max-w-full">{referral.special_case}</span> : <span className="text-gray-400">—</span>}</td>
                                   <td className="px-3 py-3 overflow-visible relative">
                                     {requesterId && userNames[requesterId] ? <UserProfilePopover userId={requesterId} displayName={userNames[requesterId]} /> : <span className="text-gray-400">{referral.accepted_by || "—"}</span>}
                                   </td>
@@ -970,15 +1299,15 @@ export default function ProfessorDashboard() {
                           const isRerefer = referral.rerefer_request_status === "pending" && !!referral.rerefer_request_reason;
                           const isEdit = referral.edit_request_status === "pending" && !!referral.edit_request_reason;
                           const isDeletion = referral.deletion_request_status === "pending" && !!referral.deletion_request_reason;
-                          const isStatusChange = !!(referral as any).status_change_reason;
-                          const rawStatusChangeReason: string = (referral as any).status_change_reason || "";
+                          const isStatusChange = !!referral.status_change_reason;
+                          const rawStatusChangeReason: string = referral.status_change_reason || "";
                           const statusChangeParts = rawStatusChangeReason.includes("::") ? rawStatusChangeReason.split("::") : ["deferred", rawStatusChangeReason];
                           const statusChangeTargetVal = statusChangeParts[0];
                           const statusChangeReasonClean = statusChangeParts.slice(1).join("::");
-                          const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : "Blacklist") : "Unknown";
-                          const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : "bg-red-100 text-red-700";
+                          const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : statusChangeTargetVal === "completed" ? "Completion" : "Blacklist") : "Unknown";
+                          const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : statusChangeTargetVal === "completed" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
                           const reason = isRerefer ? referral.rerefer_request_reason : isEdit ? referral.edit_request_reason : isDeletion ? referral.deletion_request_reason : statusChangeReasonClean;
-                          const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : "bg-orange-50 border-orange-500";
+                          const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : statusChangeTargetVal === "completed" ? "bg-green-50 border-green-500" : "bg-orange-50 border-orange-500";
                           const requesterId = isRerefer ? referral.rerefer_requested_by : isDeletion ? referral.deletion_requested_by : referral.accepted_by_user_id;
                           return (
                             <div key={`${referral.id}-${reqType}-mobile`} className="bg-white rounded-lg border-2 border-[#87c4d8]/50 shadow p-4 space-y-3">
@@ -1198,6 +1527,7 @@ export default function ProfessorDashboard() {
                     key={referral.id}
                     id={referral.id}
                     title={`Referring ${referral.age} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
+                    specialCase={referral.special_case || undefined}
                     createdByName={referral.user_id ? userNames[referral.user_id] : undefined}
                     medicalAlert={referral.medical_alert || undefined}
                     clinicalSectionOrigin={referral.clinical_section_origin || undefined}
@@ -1212,6 +1542,7 @@ export default function ProfessorDashboard() {
                     acceptedAt={referral.accepted_at || null}
                     referralStatus={referral.chart_number && blacklistedChartNumbers.has(referral.chart_number) ? "blacklisted" : (referral.referral_status || null)}
                     status={referral.status}
+                    createdAt={referral.created_at}
                     showAccept={false}
                     showUpdate={true}
                     showApprove={false}
@@ -1222,7 +1553,8 @@ export default function ProfessorDashboard() {
                     editRequestReason={referral.edit_request_reason}
                     editRequestStatus={referral.edit_request_status}
                     rereferRequestStatus={referral.rerefer_request_status || null}
-                    deletionRequestStatus={(referral as any).deletion_request_status || null}
+                    deletionRequestStatus={referral.deletion_request_status || null}
+                    statusChangeReason={referral.status_change_reason || null}
                     isProfessor={true}
                     isAdvisee={adviseeIds.size === 0 || adviseeIds.has(referral.user_id)}
                     onUpdate={handleUpdateReferral}
@@ -1471,34 +1803,59 @@ export default function ProfessorDashboard() {
         </div>
       )}
 
-      {/* Approve Status Change Dialog */}
-      <Dialog open={isApproveStatusChangeOpen} onOpenChange={(open) => { if (!open) setIsApproveStatusChangeOpen(false); }}>
-        <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden">
-          <div className="bg-secondary px-6 py-4">
-            <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Approve Status Change</DialogTitle>
-            <p className="text-white/70 text-[10px] mt-0.5">Confirm the deferral or blacklist status change</p>
-          </div>
-          <div className="p-6">
-            <p className="text-sm text-muted-foreground mb-6">Are you sure you want to approve this status change? The referral will keep its new status.</p>
-            <div className="flex gap-3">
-              <button onClick={confirmApproveStatusChange} className="flex-1 px-6 py-2 bg-success text-white text-xs font-bold rounded hover:bg-success/90 transition-colors shadow uppercase tracking-wide">YES, APPROVE</button>
-              <button onClick={() => setIsApproveStatusChangeOpen(false)} className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide">CANCEL</button>
+      {/* Approve Status Change Confirmation Dialog — mirrors Approve Edit Request style */}
+      {isApproveStatusChangeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsApproveStatusChangeOpen(false)} />
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <CheckCircle className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">
+                Approve {statusChangeTarget === "blacklisted" ? "Blacklist" : statusChangeTarget === "completed" ? "Completion" : "Deferral"} Request
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                Are you sure you want to approve this {statusChangeTarget === "blacklisted" ? "blacklist" : statusChangeTarget === "completed" ? "completion" : "deferral"} request? The referral status will be changed to <strong>{statusChangeTarget === "blacklisted" ? "Blacklisted" : statusChangeTarget === "completed" ? "Completed" : "Deferred"}</strong>.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={confirmApproveStatusChange}
+                  className="flex-1 px-6 py-2 bg-success text-white text-xs font-bold rounded hover:bg-success/90 transition-colors shadow uppercase tracking-wide"
+                >
+                  YES, APPROVE
+                </button>
+                <button
+                  onClick={() => setIsApproveStatusChangeOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
+                >
+                  CANCEL
+                </button>
+              </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
 
-      {/* Decline Status Change Dialog */}
+      {/* Decline Status Change Dialog — mirrors Decline Edit Request style */}
       <Dialog open={isDeclineStatusChangeOpen} onOpenChange={(open) => { if (!open) setIsDeclineStatusChangeOpen(false); }}>
         <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden">
           <div className="bg-red-600 px-6 py-4">
-            <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Decline Status Change</DialogTitle>
-            <p className="text-white/70 text-[10px] mt-0.5">The referral will be reverted to Ongoing</p>
+            <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Decline Status Change Request</DialogTitle>
+            <p className="text-white/70 text-[10px] mt-0.5">Please provide a reason for declining this deferral / blacklist / completion request</p>
           </div>
           <div className="p-6 space-y-4">
-            <p className="text-sm text-muted-foreground">Declining will revert the referral status back to <strong>Ongoing</strong>.</p>
+            <div>
+              <label className="text-[10px] font-bold text-red-700 uppercase tracking-wide mb-1.5 block">Reason for Decline</label>
+              <textarea
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+                placeholder="Enter the reason for declining..."
+                className="w-full min-h-[100px] text-xs border-2 border-gray-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none"
+              />
+            </div>
             <div className="flex gap-3">
-              <button onClick={confirmDeclineStatusChange} className="flex-1 px-4 py-2.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors uppercase tracking-wide">YES, DECLINE</button>
+              <button onClick={confirmDeclineStatusChange} disabled={!declineReason.trim()} className="flex-1 px-4 py-2.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed">SUBMIT DECLINE</button>
               <button onClick={() => setIsDeclineStatusChangeOpen(false)} className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors uppercase tracking-wide">CANCEL</button>
             </div>
           </div>

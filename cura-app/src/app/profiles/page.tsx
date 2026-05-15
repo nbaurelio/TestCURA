@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Search, Mail, Building2, GraduationCap, Users, X, ChevronDown, FileText, CheckCircle } from "lucide-react";
 import { Header } from "@/components/layout/Header";
@@ -8,6 +8,7 @@ import { Footer } from "@/components/layout/Footer";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { getAllProfiles, getAdvisees, getCurrentUserId, getMockUserProfile, Profile } from "@/lib/api/profiles";
 import { getReferrals, acceptReferral, submitEditRequest, submitDeletionRequest, Referral } from "@/lib/api/referrals";
+import { getAllEvents } from "@/lib/api/events";
 import { ViewDetailsModal } from "@/components/modals/ViewDetailsModal";
 import { ActivityLogDetailsModal } from "@/components/modals/ActivityLogDetailsModal";
 import { ActivityLog } from "@/lib/api/activity-logs";
@@ -40,6 +41,7 @@ export default function ProfilesPage() {
   const [openLogMenuId, setOpenLogMenuId] = useState<string | null>(null);
   const logMenuRef = React.useRef<HTMLDivElement>(null);
   const [allReferrals, setAllReferrals] = useState<Referral[]>([]);
+  const [allEvents, setAllEvents] = useState<any[]>([]);
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [detailReferral, setDetailReferral] = useState<Referral | null>(null);
@@ -72,13 +74,15 @@ export default function ProfilesPage() {
 
   useEffect(() => {
     const load = async () => {
-      const [profileData, referralData, currentProfile] = await Promise.all([
+      const [profileData, referralData, currentProfile, eventsData] = await Promise.all([
         getAllProfiles(),
         getReferrals(false),
         getMockUserProfile(),
+        getAllEvents(),
       ]);
       setProfiles(profileData);
       setAllReferrals(referralData || []);
+      setAllEvents(eventsData || []);
       if (currentProfile) setCurrentUserName(`${currentProfile.first_name} ${currentProfile.last_name}`);
 
       if (role === "professor") {
@@ -91,6 +95,71 @@ export default function ProfilesPage() {
     };
     load();
   }, [role]);
+
+  // Fetches the professor's approve/decline activity logs. Three sources are
+  // merged so the Logs tab covers every decision-making action:
+  //   1. profData       — approve/decline of edit/rerefer/deletion requests
+  //   2. profStatusData — approve/decline of status-change requests
+  //                       (CHANGE_REFERRAL_STATUS rows written by the
+  //                       professor in `professor/page.tsx`)
+  //   3. statusData     — legacy advisee CHANGE_REFERRAL_STATUS rows that
+  //                       pre-date the request/approval flow, kept for
+  //                       backwards-compat
+  const fetchProfessorLogs = useCallback(async (professor: Profile) => {
+    setLogsLoading(true);
+    try {
+      const adviseeIds = profiles
+        .filter(p => p.adviser_id === professor.id)
+        .map(p => p.id);
+      const [{ data: profData }, { data: profStatusData }, { data: statusData }] = await Promise.all([
+        (supabase.from("activity_logs") as any)
+          .select("*")
+          .eq("user_id", professor.id)
+          .in("action", [
+            "APPROVE_EDIT_REQUEST",
+            "DECLINE_EDIT_REQUEST",
+            "APPROVE_REREFER_REQUEST",
+            "DECLINE_REREFER_REQUEST",
+            "APPROVE_DELETION_REQUEST",
+            "DECLINE_DELETION_REQUEST",
+          ]),
+        (supabase.from("activity_logs") as any)
+          .select("*")
+          .eq("user_id", professor.id)
+          .eq("action", "CHANGE_REFERRAL_STATUS"),
+        adviseeIds.length > 0
+          ? (supabase.from("activity_logs") as any)
+              .select("*")
+              .in("user_id", adviseeIds)
+              .eq("action", "CHANGE_REFERRAL_STATUS")
+          : Promise.resolve({ data: [] }),
+      ]);
+      const statusFiltered = (statusData || []).filter((log: any) => {
+        try {
+          const m = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
+          return m?.new_status === "deferred" || m?.new_status === "blacklisted" || m?.new_status === "completed";
+        } catch { return false; }
+      });
+      const merged = [...(profData || []), ...(profStatusData || []), ...statusFiltered]
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setProfessorLogs(merged);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [profiles]);
+
+  // Eagerly pre-load logs when a professor profile is opened (only for
+  // viewers who can see them). This populates `professorLogs.length` so the
+  // Logs tab can show its count badge before the tab is clicked.
+  useEffect(() => {
+    if (!selectedProfile) return;
+    if (selectedProfile.role !== "professor") return;
+    if (!canSeeProfessorLogs) return;
+    if (professorLogs.length > 0 || logsLoading) return;
+    fetchProfessorLogs(selectedProfile);
+  }, [selectedProfile, canSeeProfessorLogs, professorLogs.length, logsLoading, fetchProfessorLogs]);
 
   const filtered = useMemo(() => {
     let result = profiles;
@@ -426,49 +495,18 @@ export default function ProfilesPage() {
                 })()}
                 {selectedProfile.role === "professor" && canSeeProfessorLogs && (
                   <button
-                    onClick={async () => {
+                    onClick={() => {
                       setProfileTab("logs");
-                      if (professorLogs.length === 0) {
-                        setLogsLoading(true);
-                        try {
-                          const adviseeIds = profiles
-                            .filter(p => p.adviser_id === selectedProfile.id)
-                            .map(p => p.id);
-                          const [{ data: profData }, { data: statusData }] = await Promise.all([
-                            (supabase.from("activity_logs") as any)
-                              .select("*")
-                              .eq("user_id", selectedProfile.id)
-                              .in("action", [
-                                "APPROVE_EDIT_REQUEST",
-                                "DECLINE_EDIT_REQUEST",
-                                "APPROVE_REREFER_REQUEST",
-                                "DECLINE_REREFER_REQUEST",
-                                "APPROVE_DELETION_REQUEST",
-                                "DECLINE_DELETION_REQUEST",
-                              ]),
-                            adviseeIds.length > 0
-                              ? (supabase.from("activity_logs") as any)
-                                  .select("*")
-                                  .in("user_id", adviseeIds)
-                                  .eq("action", "CHANGE_REFERRAL_STATUS")
-                              : Promise.resolve({ data: [] }),
-                          ]);
-                          const statusFiltered = (statusData || []).filter((log: any) => {
-                            try {
-                              const m = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
-                              return m?.new_status === "deferred" || m?.new_status === "blacklisted";
-                            } catch { return false; }
-                          });
-                          const merged = [...(profData || []), ...statusFiltered]
-                            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-                          setProfessorLogs(merged);
-                        } catch (e) { console.error(e); }
-                        finally { setLogsLoading(false); }
+                      // No-op if the eager pre-load already filled the cache
+                      // (see the `useEffect` near `fetchProfessorLogs`).
+                      if (professorLogs.length === 0 && !logsLoading) {
+                        fetchProfessorLogs(selectedProfile);
                       }
                     }}
                     className={`flex-1 py-2.5 text-[11px] font-bold uppercase tracking-wide transition-colors flex items-center justify-center gap-1.5 ${profileTab === "logs" ? "text-secondary border-b-2 border-secondary bg-secondary/5" : "text-gray-400 hover:text-secondary"}`}
                   >
                     <ClipboardList className="h-3.5 w-3.5" /> Logs
+                    <span className="ml-1 bg-gray-100 text-gray-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{professorLogs.length}</span>
                   </button>
                 )}
                 {selectedProfile.role === "clinician" && (
@@ -532,6 +570,13 @@ export default function ProfilesPage() {
                       const completed = accepted.filter(r => r.referral_status === "completed").length;
                       const deferred = accepted.filter(r => r.referral_status === "deferred").length;
                       const blacklisted = accepted.filter(r => r.referral_status === "blacklisted").length;
+                      // Event statistics for the clinician
+                      const clinicianEvents = allEvents.filter(e => e.user_id === selectedProfile.id);
+                      const scheduled = clinicianEvents.filter(e => e.status === "scheduled" || !e.status).length;
+                      const treatmentRendered = clinicianEvents.filter(e => e.status === "treatment_rendered").length;
+                      const canceled = clinicianEvents.filter(e => e.status === "canceled").length;
+                      const rescheduled = clinicianEvents.filter(e => e.status === "rescheduled").length;
+                      const noShow = clinicianEvents.filter(e => e.status === "no_show").length;
                       return (
                         <div className="bg-gray-50 rounded-lg px-4 py-3 border border-secondary/10">
                           <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-3">Activity Summary</p>
@@ -546,7 +591,8 @@ export default function ProfilesPage() {
                               <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mt-0.5">Accepted</p>
                             </div>
                           </div>
-                          {/* Bottom row: statuses */}
+                          {/* Referral Statuses */}
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-3 mb-2">Referral Statuses</p>
                           <div className="grid grid-cols-4 gap-1.5">
                             <div className="bg-blue-50 border border-blue-200 rounded-lg px-2 py-2 text-center">
                               <p className="text-base font-bold text-blue-600">{ongoing}</p>
@@ -565,6 +611,30 @@ export default function ProfilesPage() {
                               <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">Blacklisted</p>
                             </div>
                           </div>
+                          {/* Event Statuses */}
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mt-4 mb-2">Event Statuses</p>
+                          <div className="grid grid-cols-5 gap-1.5">
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg px-1 py-2 text-center">
+                              <p className="text-sm font-bold text-blue-600">{scheduled}</p>
+                              <p className="text-[7px] font-bold text-blue-400 uppercase tracking-wide mt-0.5 leading-tight">Scheduled</p>
+                            </div>
+                            <div className="bg-green-50 border border-green-200 rounded-lg px-1 py-2 text-center">
+                              <p className="text-sm font-bold text-green-600">{treatmentRendered}</p>
+                              <p className="text-[7px] font-bold text-green-400 uppercase tracking-wide mt-0.5 leading-tight">Treatment<br/>Rendered</p>
+                            </div>
+                            <div className="bg-red-50 border border-red-200 rounded-lg px-1 py-2 text-center">
+                              <p className="text-sm font-bold text-red-600">{canceled}</p>
+                              <p className="text-[7px] font-bold text-red-400 uppercase tracking-wide mt-0.5 leading-tight">Canceled</p>
+                            </div>
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-1 py-2 text-center">
+                              <p className="text-sm font-bold text-amber-600">{rescheduled}</p>
+                              <p className="text-[7px] font-bold text-amber-400 uppercase tracking-wide mt-0.5 leading-tight">Rescheduled</p>
+                            </div>
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg px-1 py-2 text-center">
+                              <p className="text-sm font-bold text-gray-600">{noShow}</p>
+                              <p className="text-[7px] font-bold text-gray-400 uppercase tracking-wide mt-0.5 leading-tight">No Show</p>
+                            </div>
+                          </div>
                         </div>
                       );
                     })()}
@@ -573,13 +643,17 @@ export default function ProfilesPage() {
 
                 {/* Activity Logs Tab — professors, visible to clinical_admin only */}
                 {profileTab === "logs" && selectedProfile.role === "professor" && canSeeProfessorLogs && (() => {
+                  const professorFullName = `${selectedProfile.first_name} ${selectedProfile.last_name}`.trim();
+                  const parseMeta = (log: ActivityLog): any => {
+                    try { return typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata; } catch { return null; }
+                  };
                   const getActionLabel = (log: ActivityLog) => {
                     if (log.action === "CHANGE_REFERRAL_STATUS") {
-                      try {
-                        const m = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
-                        if (m?.new_status === "deferred") return "Deferred";
-                        if (m?.new_status === "blacklisted") return "Blacklisted";
-                      } catch {}
+                      const m = parseMeta(log);
+                      if (m?.declined_via === "status_change_request") return "Declined";
+                      if (m?.new_status === "deferred") return "Deferred";
+                      if (m?.new_status === "blacklisted") return "Blacklisted";
+                      if (m?.new_status === "completed") return "Completed";
                       return "Status Changed";
                     }
                     const map: Record<string, string> = {
@@ -594,11 +668,11 @@ export default function ProfilesPage() {
                   };
                   const getActionStyle = (log: ActivityLog) => {
                     if (log.action === "CHANGE_REFERRAL_STATUS") {
-                      try {
-                        const m = typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata;
-                        if (m?.new_status === "deferred") return "bg-orange-50 border-orange-300 text-orange-700";
-                        if (m?.new_status === "blacklisted") return "bg-gray-100 border-gray-400 text-gray-700";
-                      } catch {}
+                      const m = parseMeta(log);
+                      if (m?.declined_via === "status_change_request") return "bg-red-50 border-red-300 text-red-700";
+                      if (m?.new_status === "deferred") return "bg-orange-50 border-orange-300 text-orange-700";
+                      if (m?.new_status === "blacklisted") return "bg-gray-100 border-gray-400 text-gray-700";
+                      if (m?.new_status === "completed") return "bg-green-50 border-green-300 text-green-700";
                     }
                     const map: Record<string, string> = {
                       APPROVE_EDIT_REQUEST: "bg-green-50 border-green-300 text-green-700",
@@ -609,6 +683,44 @@ export default function ProfilesPage() {
                       DECLINE_DELETION_REQUEST: "bg-red-50 border-red-300 text-red-700",
                     };
                     return map[log.action] || "bg-gray-50 border-gray-300 text-gray-700";
+                  };
+                  // Build a human-friendly description from the log action +
+                  // metadata, framed from the professor's decision-making
+                  // perspective. The raw `log.description` strings start with
+                  // "YOU" (correct from the actor's own activity log view but
+                  // misleading here, since whoever opens this popup is not
+                  // the professor). We rewrite to "<Professor name> APPROVED/
+                  // DECLINED <request type>" instead, matching the user-facing
+                  // role of a professor: decision-maker only, never the one
+                  // who performed the underlying status change.
+                  const buildDescription = (log: ActivityLog): string => {
+                    const m = parseMeta(log);
+                    const chart = m?.chart_number ? ` - Chart: ${m.chart_number}` : "";
+                    const upperName = professorFullName.toUpperCase();
+                    switch (log.action) {
+                      case "APPROVE_EDIT_REQUEST":
+                        return `${upperName} APPROVED THE EDIT REQUEST${chart}`;
+                      case "DECLINE_EDIT_REQUEST":
+                        return `${upperName} DECLINED THE EDIT REQUEST${chart}`;
+                      case "APPROVE_REREFER_REQUEST":
+                        return `${upperName} APPROVED THE REREFER REQUEST${chart}`;
+                      case "DECLINE_REREFER_REQUEST":
+                        return `${upperName} DECLINED THE REREFER REQUEST${chart}`;
+                      case "APPROVE_DELETION_REQUEST":
+                        return `${upperName} APPROVED THE DELETION REQUEST${chart}`;
+                      case "DECLINE_DELETION_REQUEST":
+                        return `${upperName} DECLINED THE DELETION REQUEST${chart}`;
+                      case "CHANGE_REFERRAL_STATUS": {
+                        if (m?.declined_via === "status_change_request") {
+                          const target = String(m?.declined_target || "").toUpperCase();
+                          return `${upperName} DECLINED STATUS CHANGE TO ${target || "ONGOING"}${chart}`;
+                        }
+                        const target = String(m?.new_status || "").toUpperCase();
+                        return `${upperName} APPROVED STATUS CHANGE TO ${target}${chart}`;
+                      }
+                      default:
+                        return (log.description || "").replace(/\bYOU\b/gi, upperName);
+                    }
                   };
                   return (
                     <div className="px-5 py-4 space-y-2">
@@ -640,7 +752,7 @@ export default function ProfilesPage() {
                           <div key={log.id} className="bg-white rounded-lg border border-secondary/15 shadow-sm px-4 py-3">
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs font-bold text-secondary leading-snug">{log.description}</p>
+                                <p className="text-xs font-bold text-secondary leading-snug">{buildDescription(log)}</p>
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                                   {requesterName && (
                                     <p className="text-[10px] text-gray-500">Requested by: <span className="font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">{requesterName}</span></p>

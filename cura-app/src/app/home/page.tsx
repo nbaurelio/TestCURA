@@ -109,7 +109,8 @@ export default function HomePage() {
       r.accepted_by && r.accepted_by !== "None" &&
       (acceptedReferralIds.has(r.id) || r.accepted_by_user_id === currentUserId) &&
       (r.status === "pending" || r.status === "approved") &&
-      !["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() ?? "")
+      !["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() ?? "") &&
+      r.rerefer_request_status !== "approved"
     ).length,
     [referrals, acceptedReferralIds, currentUserId]
   );
@@ -121,14 +122,25 @@ export default function HomePage() {
     referrals.filter(r => r.user_id === currentUserId && r.deletion_request_status && (r.deletion_request_status === "pending" || r.deletion_request_status === "approved" || r.deletion_request_status === "declined")).length,
     [referrals, currentUserId]
   );
+  // Mirror the row-building logic in /request-status: a referral surfaces a
+  // row when (a) the current user is the CREATOR and the referral has any
+  // edit-request or deletion-request (pending / approved / declined), or
+  // (b) the current user is the ACCEPTOR and the referral has a pending
+  // status_change_reason (Deferral / Blacklisted request).
   const requestStatusCount = useMemo(() =>
-    referrals.filter(r =>
-      r.user_id === currentUserId && (
-        (r.edit_request_status === "pending") ||
-        ((r as any).deletion_request_status === "pending") ||
-        !!(r as any).status_change_reason
-      )
-    ).length,
+    referrals.reduce((count, r) => {
+      const isCreator  = r.user_id === currentUserId;
+      const isAcceptor = r.accepted_by_user_id === currentUserId;
+      let rows = 0;
+      if (isCreator) {
+        if (r.edit_request_status && r.edit_request_reason) rows++;
+        if (r.deletion_request_status && r.deletion_request_reason) rows++;
+      }
+      if (isAcceptor && r.status_change_reason) rows++;
+      // Count rereferral requests for acceptors (pending or approved, exclude completed)
+      if (isAcceptor && r.rerefer_request_status && r.rerefer_request_reason && r.rerefer_request_status !== "completed") rows++;
+      return count + rows;
+    }, 0),
     [referrals, currentUserId]
   );
   const completedCount = useMemo(() =>
@@ -386,7 +398,17 @@ export default function HomePage() {
   const visibleReferrals = useMemo(() => {
     return filteredReferrals
       .filter(referral => {
-        // Exclude pinned referrals (both pending and approved)
+        // The home feed is the "open pool" — once a referral has been
+        // accepted by anyone it must disappear from here regardless of the
+        // is_featured flag, accepted_by_user_id, or status field. The
+        // accepted_by string defaults to 'None' on creation and is filled
+        // with the acceptor's display name on acceptance.
+        if (referral.accepted_by && referral.accepted_by !== 'None') {
+          return false;
+        }
+        // Belt-and-suspenders: also drop any pinned referral whose status
+        // is pending/approved (legacy guard; covered by the above for
+        // freshly-accepted rows).
         if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
           return false;
         }
@@ -408,6 +430,24 @@ export default function HomePage() {
 
     try {
       const referral = referrals.find(r => r.id === referralToAccept);
+
+      // Safety net: block the original rereferrer from re-accepting a
+      // referral they just sent back to the system. The card-level gate
+      // (`showAccept` on /home) already hides the button for this user, but
+      // re-checking here protects entry points that bypass that gate (e.g.
+      // the featured/overdue carousel's FeaturedReferralCard, which always
+      // renders an Accept button).
+      if (
+        referral &&
+        referral.rerefer_request_status === "completed" &&
+        referral.rerefer_requested_by === currentUserId
+      ) {
+        alert("You can't accept a referral you just rereferred back to the system.");
+        setIsAcceptConfirmOpen(false);
+        setReferralToAccept(null);
+        return;
+      }
+
       await acceptReferral(referralToAccept, currentUserName);
       setIsAcceptConfirmOpen(false);
       setReferralToAccept(null);
@@ -525,7 +565,7 @@ export default function HomePage() {
                 onClick={() => setIsSortOpen(p => !p)}
                 className="flex items-center gap-1.5 bg-white border-2 border-secondary/20 hover:border-secondary/50 text-secondary text-xs font-bold uppercase tracking-wide px-3 py-2 rounded shadow-sm transition-colors"
               >
-                <span>Filter by: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                <span>Sort by: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
                 <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
               </button>
               {isSortOpen && (
@@ -555,7 +595,13 @@ export default function HomePage() {
               </div>
             ) : visibleReferrals.length === 0 ? (
               <div className="bg-[#87c4d8]/25 backdrop-blur-sm rounded shadow border border-[#87c4d8]/50 p-8 text-center text-muted-foreground">
-                No referrals yet. Create your first referral!
+                {referrals.length === 0
+                  ? "No referrals yet. Create your first referral!"
+                  : isAdvancedFilterActive
+                    ? "No referrals match the selected filters. Try adjusting or resetting the advanced filter."
+                    : filteredReferrals.length === 0
+                      ? "No referrals match your search."
+                      : "No referrals available in the open pool right now."}
               </div>
             ) : (
               visibleReferrals.map((referral) => (
@@ -576,7 +622,21 @@ export default function HomePage() {
                   acceptedAt={referral.accepted_at}
                   status={referral.status}
                   referralStatus={referral.chart_number && blacklistedChartNumbers.has(referral.chart_number) ? "blacklisted" : (referral.referral_status || null)}
-                  showAccept={referral.accepted_by === "None" && referral.user_id !== currentUserId && !blacklistedChartNumbers.has(referral.chart_number || "")}
+                  showAccept={
+                    referral.accepted_by === "None" &&
+                    referral.user_id !== currentUserId &&
+                    !blacklistedChartNumbers.has(referral.chart_number || "") &&
+                    // Block the user who just rereferred this referral from
+                    // re-accepting it the moment it lands back in the open
+                    // pool. `sendBackToSystem` sets rerefer_request_status to
+                    // "completed" and leaves `rerefer_requested_by` pointing
+                    // at the rereferrer, so this check is scoped to the
+                    // CURRENT post-send-back cycle only; a later user who
+                    // accepts and then rereferes it again will overwrite
+                    // `rerefer_requested_by`, naturally un-blocking the
+                    // original rereferrer.
+                    !(referral.rerefer_request_status === "completed" && referral.rerefer_requested_by === currentUserId)
+                  }
                   createdAt={sendBackMap.get(referral.id) ?? referral.created_at}
                   treatment={referral.treatment || undefined}
                   medicalHistory={referral.medical_history || undefined}
@@ -914,28 +974,28 @@ export default function HomePage() {
             onClick={() => setIsAcceptConfirmOpen(false)}
           />
 
-          {/* Confirmation Modal */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+          {/* Confirmation Modal — mirrors Approve Rereferral Request style */}
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
             <div className="text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
                 <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h3 className="text-lg font-bold text-secondary mb-2">Confirm Acceptance</h3>
-              <p className="text-sm text-gray-600 mb-6">
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Accept Referral</h3>
+              <p className="text-sm text-muted-foreground mb-6">
                 Are you sure you want to accept this referral?
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={confirmAcceptReferral}
-                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
+                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded hover:bg-secondary/90 transition-colors shadow uppercase tracking-wide"
                 >
                   YES, ACCEPT
                 </button>
                 <button
                   onClick={() => setIsAcceptConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
                 >
                   CANCEL
                 </button>

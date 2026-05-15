@@ -15,7 +15,7 @@ export function RequestStatusButton({ count }: RequestStatusButtonProps) {
           <ClipboardList className="h-5 w-5 text-secondary" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide leading-tight">Requests Referrals</p>
+          <p className="text-[10px] font-bold text-secondary uppercase tracking-wide leading-tight">Request Status</p>
           {count !== undefined && (
             <p className="text-lg font-bold text-secondary leading-tight">{count}</p>
           )}

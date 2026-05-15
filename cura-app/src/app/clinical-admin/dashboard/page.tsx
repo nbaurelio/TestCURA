@@ -7,6 +7,7 @@ import { Footer } from "@/components/layout/Footer";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { getReferrals, Referral } from "@/lib/api/referrals";
 import { getAllProfiles, Profile } from "@/lib/api/profiles";
+import { getAllEvents } from "@/lib/api/events";
 import {
   ArrowLeft,
   FileText,
@@ -24,6 +25,16 @@ import {
   Pause,
   Ban,
   Repeat,
+  Calendar as CalendarIcon,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  ArrowRight,
+  CheckCircle,
+  CalendarDays,
+  RefreshCw,
+  UserCheck,
+  FilePlus,
 } from "lucide-react";
 // Lazy-loaded at call site to avoid blocking page compilation
 const lazyExport = () => import("@/lib/utils/dashboardExport");
@@ -92,15 +103,15 @@ function StatCard({ icon: Icon, label, value, sub, color, onClick }: {
   return (
     <div
       onClick={onClick}
-      className={`bg-white rounded-lg border-2 border-[#87c4d8]/30 shadow-sm p-4 flex items-start gap-3 hover:shadow-md hover:border-[#87c4d8]/50 transition-all ${onClick ? "cursor-pointer active:scale-[0.98]" : ""}`}
+      className={`bg-white rounded-lg border-2 border-[#87c4d8]/30 shadow-sm p-3 flex items-start gap-2.5 hover:shadow-md hover:border-[#87c4d8]/50 transition-all ${onClick ? "cursor-pointer active:scale-[0.98]" : ""}`}
     >
-      <div className="p-2.5 rounded-lg bg-[#87c4d8]/10">
-        <Icon className="h-5 w-5" style={{ color }} />
+      <div className="p-2 rounded-lg bg-[#87c4d8]/10">
+        <Icon className="h-4 w-4" style={{ color }} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">{label}</p>
-        <p className="text-2xl font-bold text-secondary leading-tight mt-0.5">{value}</p>
-        <p className="text-[10px] text-gray-400 mt-0.5">{sub}</p>
+        <p className="text-xl font-bold text-secondary leading-tight mt-0.5">{value}</p>
+        <p className="text-[9px] text-gray-400 mt-0.5">{sub}</p>
       </div>
     </div>
   );
@@ -121,7 +132,7 @@ function ChartCard({ id, title, children, className = "" }: {
 }
 
 // ─── Stat Detail Modal ──────────────────────────────────────────────────────
-type StatModalType = "total" | "completed" | "overdue" | "avgAcceptance" | "available" | "ongoing" | "deferred" | "blacklisted" | "avgCompletion" | "rereferred" | null;
+type StatModalType = "total" | "recentlyCreated" | "accepted" | "completed" | "overdue" | "avgAcceptance" | "available" | "ongoing" | "deferred" | "blacklisted" | "avgCompletion" | "rereferred" | null;
 
 const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
   ongoing:     { bg: "bg-blue-50",   text: "text-blue-700" },
@@ -149,6 +160,25 @@ function StatDetailModal({ type, onClose, rows, title, accent }: {
       { key: "status", label: "Status" },
       { key: "created", label: "Created" },
       { key: "age", label: "Days Since" },
+    ],
+    recentlyCreated: [
+      { key: "chart", label: "Chart #" },
+      { key: "clinician", label: "Clinician" },
+      { key: "origin", label: "Origin" },
+      { key: "destination", label: "Destination" },
+      { key: "status", label: "Status" },
+      { key: "created", label: "Created" },
+      { key: "age", label: "Days Since" },
+    ],
+    accepted: [
+      { key: "chart", label: "Chart #" },
+      { key: "clinician", label: "Created By" },
+      { key: "acceptedBy", label: "Accepted By" },
+      { key: "origin", label: "Origin" },
+      { key: "destination", label: "Destination" },
+      { key: "created", label: "Created" },
+      { key: "accepted", label: "Accepted" },
+      { key: "daysToAccept", label: "Days to Accept" },
     ],
     completed: [
       { key: "chart", label: "Chart #" },
@@ -316,6 +346,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
   const [clinicians, setClinicians] = useState<Profile[]>([]);
   const [professors, setProfessors] = useState<Profile[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [allEvents, setAllEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>("all");
@@ -326,12 +357,14 @@ export default function ClinicalAdminAnalyticsDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const [refs, allProfiles] = await Promise.all([
+        const [refs, allProfiles, eventsData] = await Promise.all([
           getReferrals(true),
           getAllProfiles(),
+          getAllEvents(),
         ]);
         setReferrals(refs || []);
         setAllProfiles(allProfiles || []);
+        setAllEvents(eventsData || []);
         // Clinical admin sees all clinicians
         setClinicians((allProfiles || []).filter(p => p.role === "clinician"));
         setProfessors((allProfiles || []).filter(p => p.role === "professor"));
@@ -366,36 +399,49 @@ export default function ClinicalAdminAnalyticsDashboard() {
     });
   }, [referrals, clinicianIds, periodStart]);
 
+  // ── Unfiltered (all-time) variants ───────────────────────────────────────
+  // The summary stat cards must always reflect the full college-wide picture
+  // and ignore the period-pill filter (which now scopes only the charts).
+  const createdByClinicianAll = useMemo(() => {
+    return referrals.filter(r => clinicianIds.size === 0 || clinicianIds.has(r.user_id));
+  }, [referrals, clinicianIds]);
+
+  const acceptedByClinicianAll = useMemo(() => {
+    return referrals.filter(r => clinicianIds.size === 0 || clinicianIds.has(r.accepted_by_user_id || ""));
+  }, [referrals, clinicianIds]);
+
   // ── Computed stat values ──────────────────────────────────────────────────
-  const totalRefs = createdByClinician.length;
+  // NOTE: Stat cards intentionally use the *All variants so the period pills
+  // (7 days / N weeks / All Time) above the charts do not affect them.
+  const totalRefs = createdByClinicianAll.length;
 
   const completedCount = useMemo(
-    () => acceptedByClinician.filter(r => r.referral_status === "completed").length,
-    [acceptedByClinician]
+    () => acceptedByClinicianAll.filter(r => r.referral_status === "completed").length,
+    [acceptedByClinicianAll]
   );
 
-  const completionRate = acceptedByClinician.length > 0
-    ? ((completedCount / acceptedByClinician.length) * 100).toFixed(0) : "0";
+  const completionRate = acceptedByClinicianAll.length > 0
+    ? ((completedCount / acceptedByClinicianAll.length) * 100).toFixed(0) : "0";
 
   const avgCompletionDays = useMemo(() => {
     const diffs: number[] = [];
-    createdByClinician.forEach(r => {
+    createdByClinicianAll.forEach(r => {
       if (r.referral_status !== "completed") return;
       const d = daysBetween(r.accepted_at, r.referral_status_changed_at);
       if (d !== null && d >= 0) diffs.push(d);
     });
     if (diffs.length === 0) return null;
     return +(diffs.reduce((s, v) => s + v, 0) / diffs.length).toFixed(1);
-  }, [createdByClinician]);
+  }, [createdByClinicianAll]);
 
   const overdueCount = useMemo(() => {
     const now = new Date().toISOString();
-    return createdByClinician.filter(r => {
+    return createdByClinicianAll.filter(r => {
       if (r.referral_status && r.referral_status !== "ongoing") return false;
       const age = daysBetween(r.created_at, now);
       return age !== null && age > OVERDUE_DAYS && (!r.accepted_at || r.status === "pending");
     }).length;
-  }, [createdByClinician]);
+  }, [createdByClinicianAll]);
 
   // ── Referral Status — based on ACCEPTED referrals ─────────────────────────
   const statusData = useMemo(() => {
@@ -714,31 +760,35 @@ export default function ClinicalAdminAnalyticsDashboard() {
       });
   }, [referrals, periodStart, selectedSection]);
 
-  // ── Top destination sections — ranked by inbound volume ─────────────
-  const DEST_COLORS = ["#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899", "#14B8A6", "#5B8AB8"];
-  const topDestinationData = useMemo(() => {
+  // ── Referral Treatment — Referred / Accepted / Completed per discipline ──
+  const referralTreatmentData = useMemo(() => {
     const filtered = referrals.filter(r => new Date(r.created_at) >= periodStart);
-    const counts: Record<string, number> = {};
+    const map: Record<string, { Referred: number; Accepted: number; Completed: number }> = {};
     filtered.forEach(r => {
-      const dest = r.clinical_section_destination;
-      if (dest) counts[dest] = (counts[dest] || 0) + 1;
+      const discipline = r.clinical_discipline_destination || r.clinical_discipline_origin || r.clinical_section_destination || r.clinical_section_origin;
+      if (!discipline) return;
+      if (!map[discipline]) map[discipline] = { Referred: 0, Accepted: 0, Completed: 0 };
+      map[discipline].Referred++;
+      const rs = r.referral_status?.toLowerCase();
+      if (rs && ["accepted", "ongoing", "completed", "overdue"].includes(rs)) map[discipline].Accepted++;
+      if (rs === "completed") map[discipline].Completed++;
     });
-    return Object.entries(counts)
-      .sort(([, a], [, b]) => b - a)
-      .map(([name, value], i) => ({ name, value, fill: DEST_COLORS[i % DEST_COLORS.length] }));
+    return Object.entries(map)
+      .sort(([, a], [, b]) => b.Referred - a.Referred)
+      .map(([name, vals]) => ({ name, ...vals }));
   }, [referrals, periodStart]);
 
 
 
   const avgAcceptanceDays = useMemo(() => {
     const diffs: number[] = [];
-    acceptedByClinician.forEach(r => {
+    acceptedByClinicianAll.forEach(r => {
       const d = daysBetween(r.created_at, r.accepted_at);
       if (d !== null && d >= 0) diffs.push(d);
     });
     if (diffs.length === 0) return null;
     return +(diffs.reduce((s, v) => s + v, 0) / diffs.length).toFixed(1);
-  }, [acceptedByClinician]);
+  }, [acceptedByClinicianAll]);
 
   // ══════════════════════════════════════════════════════════════════════
 
@@ -771,6 +821,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
   const HEATMAP_STATUSES = ["Pending", "Ongoing", "Completed", "Overdue", "Deferred", "Blacklisted", "Re-referred"] as const;
 
   const [adviseeSearch, setAdviseeSearch] = useState("");
+  const [disciplineSearch, setDisciplineSearch] = useState("");
 
   const STATUS_OVER_TIME_KEYS = ["Ongoing", "Completed", "Deferred", "Blacklisted", "Re-referred"] as const;
   const STATUS_OVER_TIME_COLORS: Record<string, string> = {
@@ -1167,28 +1218,43 @@ export default function ClinicalAdminAnalyticsDashboard() {
 
   // ── Stat card detail modal ────────────────────────────────────────────────
   const availableCount = useMemo(
-    () => createdByClinician.filter(r => r.accepted_by === "None" || !r.accepted_at).length,
-    [createdByClinician]
+    () => createdByClinicianAll.filter(r => r.accepted_by === "None" || !r.accepted_at).length,
+    [createdByClinicianAll]
   );
   const ongoingCount = useMemo(
-    () => createdByClinician.filter(r => {
+    () => createdByClinicianAll.filter(r => {
       if (r.accepted_by === "None" || !r.accepted_at) return false;
       const rs = r.referral_status?.toLowerCase();
       return !rs || rs === "ongoing";
     }).length,
-    [createdByClinician]
+    [createdByClinicianAll]
   );
   const deferredCount = useMemo(
-    () => createdByClinician.filter(r => r.referral_status === "deferred").length,
-    [createdByClinician]
+    () => createdByClinicianAll.filter(r => r.referral_status === "deferred").length,
+    [createdByClinicianAll]
   );
   const blacklistedCount = useMemo(
-    () => createdByClinician.filter(r => r.referral_status === "blacklisted").length,
-    [createdByClinician]
+    () => createdByClinicianAll.filter(r => r.referral_status === "blacklisted").length,
+    [createdByClinicianAll]
   );
   const rereferredCount = useMemo(
-    () => createdByClinician.filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed").length,
-    [createdByClinician]
+    () => createdByClinicianAll.filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed").length,
+    [createdByClinicianAll]
+  );
+  const acceptedCount = useMemo(
+    () => createdByClinicianAll.filter(r => r.accepted_by !== "None" && r.accepted_at).length,
+    [createdByClinicianAll]
+  );
+  const recentlyCreatedCount = useMemo(
+    () => {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      return createdByClinicianAll.filter(r => new Date(r.created_at) >= sevenDaysAgo).length;
+    },
+    [createdByClinicianAll]
+  );
+    () => createdByClinicianAll.filter(r => r.accepted_by !== "None" && r.accepted_at).length,
+    [createdByClinicianAll]
   );
 
   const [statModal, setStatModal] = useState<StatModalType>(null);
@@ -1208,7 +1274,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
   const statModalRows = useMemo(() => {
     switch (statModal) {
       case "total":
-        return createdByClinician.map(r => ({
+        return createdByClinicianAll.map(r => ({
           chart: r.chart_number,
           clinician: findName(r.user_id),
           origin: r.clinical_section_origin,
@@ -1218,7 +1284,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
           age: daysBetween(r.created_at, nowStr),
         }));
       case "completed":
-        return acceptedByClinician
+        return acceptedByClinicianAll
           .filter(r => r.referral_status === "completed")
           .map(r => ({
             chart: r.chart_number,
@@ -1231,7 +1297,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
             daysToComplete: daysBetween(r.created_at, r.referral_status_changed_at),
           }));
       case "overdue":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => {
             if (r.referral_status && r.referral_status !== "ongoing") return false;
             const age = daysBetween(r.created_at, nowStr);
@@ -1247,8 +1313,38 @@ export default function ClinicalAdminAnalyticsDashboard() {
             status: !r.accepted_at ? "pending" : (r.referral_status || "ongoing"),
           }))
           .sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
+      case "recentlyCreated": {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        return createdByClinicianAll
+          .filter(r => new Date(r.created_at) >= sevenDaysAgo)
+          .map(r => ({
+            chart: r.chart_number,
+            clinician: findName(r.user_id),
+            origin: r.clinical_section_origin,
+            destination: r.clinical_section_destination,
+            status: !r.accepted_at ? "pending" : (r.referral_status || "ongoing"),
+            created: fmtDate(r.created_at),
+            age: daysBetween(r.created_at, nowStr),
+          }))
+          .sort((a, b) => (b.age || 0) - (a.age || 0));
+      }
+      case "accepted":
+        return acceptedByClinicianAll
+          .filter(r => r.accepted_at)
+          .map(r => ({
+            chart: r.chart_number,
+            clinician: findName(r.user_id),
+            acceptedBy: findName(r.accepted_by_user_id),
+            origin: r.clinical_section_origin,
+            destination: r.clinical_section_destination,
+            created: fmtDate(r.created_at),
+            accepted: fmtDate(r.accepted_at),
+            daysToAccept: daysBetween(r.created_at, r.accepted_at),
+          }))
+          .sort((a, b) => (b.daysToAccept || 0) - (a.daysToAccept || 0));
       case "avgAcceptance":
-        return acceptedByClinician
+        return acceptedByClinicianAll
           .filter(r => r.accepted_at)
           .map(r => ({
             chart: r.chart_number,
@@ -1261,7 +1357,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
           }))
           .sort((a, b) => (b.daysToAccept || 0) - (a.daysToAccept || 0));
       case "available":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => r.accepted_by === "None" || !r.accepted_at)
           .map(r => ({
             chart: r.chart_number,
@@ -1273,7 +1369,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
           }))
           .sort((a, b) => (b.age || 0) - (a.age || 0));
       case "ongoing":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => {
             if (r.accepted_by === "None" || !r.accepted_at) return false;
             const rs = r.referral_status?.toLowerCase();
@@ -1289,7 +1385,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
             accepted: fmtDate(r.accepted_at),
           }));
       case "deferred":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => r.referral_status === "deferred")
           .map(r => ({
             chart: r.chart_number,
@@ -1301,7 +1397,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
             deferredAt: fmtDate(r.referral_status_changed_at),
           }));
       case "blacklisted":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => r.referral_status === "blacklisted")
           .map(r => ({
             chart: r.chart_number,
@@ -1313,7 +1409,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
             blacklistedAt: fmtDate(r.referral_status_changed_at),
           }));
       case "avgCompletion":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => r.referral_status === "completed" && r.accepted_at && r.referral_status_changed_at)
           .map(r => ({
             chart: r.chart_number,
@@ -1327,7 +1423,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
           }))
           .sort((a, b) => (b.daysToComplete || 0) - (a.daysToComplete || 0));
       case "rereferred":
-        return createdByClinician
+        return createdByClinicianAll
           .filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed")
           .map(r => ({
             chart: r.chart_number,
@@ -1340,10 +1436,12 @@ export default function ClinicalAdminAnalyticsDashboard() {
       default:
         return [];
     }
-  }, [statModal, createdByClinician, acceptedByClinician, allProfiles]);
+  }, [statModal, createdByClinicianAll, acceptedByClinicianAll, allProfiles]);
 
   const statModalConfig: Record<NonNullable<StatModalType>, { title: string; accent: string }> = {
     total:         { title: "Total Referrals — All Clinicians",  accent: "#5B8AB8" },
+    recentlyCreated: { title: "Recently Created Referrals (Last 7 days)", accent: "#10B981" },
+    accepted:      { title: "Accepted Referrals",                accent: "#0EA5E9" },
     completed:     { title: "Completed Referrals",               accent: "#2D7A4F" },
     overdue:       { title: "Overdue Referrals",                 accent: "#EF4444" },
     avgAcceptance: { title: "Acceptance Time — All Accepted",    accent: "#3B82F6" },
@@ -1423,10 +1521,28 @@ export default function ClinicalAdminAnalyticsDashboard() {
         headers: ["Chart #", "Clinician", "Origin", "Destination", "Created", "Days Overdue", "Status"],
         rows: overdueRows.map(r => [r.chart, r.clinician, r.origin, r.destination, r.created, r.daysOverdue, r.status]),
       },
-      // ── Stat-card sheets (one per remaining card) ────────────────────────
+      // ── Stat-card sheets ─────────────────────────────────────────────
       {
-        name: "Avg Acceptance Time",
-        headers: ["Chart #", "Created By", "Accepted By", "Origin Section", "Created", "Accepted", "Days to Accept"],
+        name: "Recently Created",
+        headers: ["Chart #", "Clinician", "Origin", "Destination", "Status", "Created", "Days Since"],
+        rows: (() => {
+          const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          return createdByClinician
+            .filter(r => new Date(r.created_at) >= sevenDaysAgo)
+            .map(r => [
+              r.chart_number,
+              findName(r.user_id),
+              r.clinical_section_origin,
+              r.clinical_section_destination,
+              !r.accepted_at ? "pending" : (r.referral_status || "ongoing"),
+              r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
+              daysBetween(r.created_at, nowStr),
+            ]);
+        })(),
+      },
+      {
+        name: "Accepted",
+        headers: ["Chart #", "Created By", "Accepted By", "Origin", "Destination", "Created", "Accepted", "Days to Accept"],
         rows: acceptedByClinician
           .filter(r => r.accepted_at)
           .map(r => [
@@ -1434,11 +1550,11 @@ export default function ClinicalAdminAnalyticsDashboard() {
             findName(r.user_id),
             findName(r.accepted_by_user_id),
             r.clinical_section_origin,
+            r.clinical_section_destination,
             r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
             r.accepted_at ? new Date(r.accepted_at).toLocaleDateString() : "—",
             daysBetween(r.created_at, r.accepted_at),
-          ])
-          .sort((a, b) => (Number(b[6]) || 0) - (Number(a[6]) || 0)),
+          ]),
       },
       {
         name: "Available",
@@ -1504,23 +1620,6 @@ export default function ClinicalAdminAnalyticsDashboard() {
           ]),
       },
       {
-        name: "Avg Completion",
-        headers: ["Chart #", "Clinician", "Accepted By", "Origin", "Destination", "Accepted", "Completed", "Days to Complete"],
-        rows: createdByClinician
-          .filter(r => r.referral_status === "completed" && r.accepted_at && r.referral_status_changed_at)
-          .map(r => [
-            r.chart_number,
-            findName(r.user_id),
-            findName(r.accepted_by_user_id),
-            r.clinical_section_origin,
-            r.clinical_section_destination,
-            r.accepted_at ? new Date(r.accepted_at).toLocaleDateString() : "—",
-            r.referral_status_changed_at ? new Date(r.referral_status_changed_at).toLocaleDateString() : "—",
-            daysBetween(r.accepted_at, r.referral_status_changed_at),
-          ])
-          .sort((a, b) => (Number(b[7]) || 0) - (Number(a[7]) || 0)),
-      },
-      {
         name: "Re-referred",
         headers: ["Chart #", "Clinician", "Accepted By", "Origin", "Destination", "Created"],
         rows: createdByClinician
@@ -1558,9 +1657,9 @@ export default function ClinicalAdminAnalyticsDashboard() {
         rows: netFlowData.map((d: any) => [d.section, d.incoming, Math.abs(d.outgoing), d.net]),
       },
       {
-        id: "chart-top-dest", title: "Referral Acceptance per Section",
-        headers: ["Section", "Referrals"],
-        rows: topDestinationData.map((d: any) => [d.name, d.value]),
+        id: "chart-top-dest", title: "Referral Treatment",
+        headers: ["Section", "Referred", "Accepted", "Completed"],
+        rows: referralTreatmentData.map((d: any) => [d.name, d.Referred, d.Accepted, d.Completed]),
       },
       // ── Row 2 ────────────────────────────────────────────────────────────
       {
@@ -1649,23 +1748,6 @@ export default function ClinicalAdminAnalyticsDashboard() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Time period pills */}
-                <div className="flex gap-1.5 bg-white rounded-lg border-2 border-[#87c4d8]/30 p-1 shadow-sm">
-                  {(["week", "5weeks", "10weeks", "15weeks", "all"] as TimePeriod[]).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => setTimePeriod(p)}
-                      className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
-                        timePeriod === p
-                          ? "bg-secondary text-white shadow"
-                          : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                      }`}
-                    >
-                      {PERIOD_LABELS[p]}
-                    </button>
-                  ))}
-                </div>
-
                 {/* Export buttons */}
                 <div className="flex gap-1">
                   <button
@@ -1694,34 +1776,81 @@ export default function ClinicalAdminAnalyticsDashboard() {
             </div>
 
             {/* ── Summary Cards ────────────────────────────────────── */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6 animate-enter-delay-2">
-              <StatCard icon={FileText}       label="Total Referrals"  value={loading ? "…" : String(totalRefs)}                                          sub="All clinicians' referrals"                                                  color="#5B8AB8" onClick={() => setStatModal("total")} />
-              <StatCard icon={TrendingUp}     label="Completed"        value={loading ? "…" : String(completedCount)}                                     sub={loading ? "Completion rate" : `${completionRate}% completion rate`}           color="#2D7A4F" onClick={() => setStatModal("completed")} />
-              <StatCard icon={AlertTriangle}  label="Overdue"          value={loading ? "…" : String(overdueCount)}                                       sub={`Pending > ${OVERDUE_DAYS} days`}                                            color="#EF4444" onClick={() => setStatModal("overdue")} />
-              <StatCard icon={Clock}          label="Avg. Acceptance"  value={loading ? "…" : (avgAcceptanceDays !== null ? `${avgAcceptanceDays}d` : "—")} sub="Created → Accepted"                                                         color="#3B82F6" onClick={() => setStatModal("avgAcceptance")} />
-              <StatCard icon={Hourglass}      label="Available"        value={loading ? "…" : String(availableCount)}                                     sub="Awaiting acceptance"                                                         color="#F59E0B" onClick={() => setStatModal("available")} />
-              <StatCard icon={Activity}        label="Ongoing"          value={loading ? "…" : String(ongoingCount)}                                        sub="Currently in progress"                                                       color="#3B82F6" onClick={() => setStatModal("ongoing")} />
-              <StatCard icon={Pause}          label="Deferred"         value={loading ? "…" : String(deferredCount)}                                      sub="Deferred referrals"                                                          color="#F97316" onClick={() => setStatModal("deferred")} />
-              <StatCard icon={Ban}            label="Blacklisted"      value={loading ? "…" : String(blacklistedCount)}                                   sub="Blacklisted referrals"                                                       color="#374151" onClick={() => setStatModal("blacklisted")} />
-              <StatCard icon={TrendingUp}     label="Avg. Completion" value={loading ? "…" : (avgCompletionDays !== null ? `${avgCompletionDays}d` : "—")}  sub="Accepted → Completed"                                                       color="#059669" onClick={() => setStatModal("avgCompletion")} />
-              <StatCard icon={Repeat}         label="Re-referred"      value={loading ? "…" : String(rereferredCount)}                                     sub="Re-referred referrals"                                                       color="#A855F7" onClick={() => setStatModal("rereferred")} />
+            {/* Referral Statistics Section */}
+            <div className="mb-2">
+              <h3 className="text-xs font-bold text-secondary uppercase tracking-wide mb-3 px-1">Referral Statistics</h3>
+              <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-4 animate-enter-delay-2">
+                {/* Row 1: Most Used / Active Referrals */}
+                <StatCard icon={TrendingUp}     label="Completed"        value={loading ? "…" : String(completedCount)}                                     sub={loading ? "Completion rate" : `${completionRate}% completion rate`}           color="#2D7A4F" onClick={() => setStatModal("completed")} />
+                <StatCard icon={UserCheck}      label="Accepted"         value={loading ? "…" : String(acceptedCount)}                                    sub={loading ? "Accepted referrals" : `${((acceptedCount / totalRefs) * 100).toFixed(1)}% acceptance rate`}             color="#0EA5E9" onClick={() => setStatModal("accepted")} />
+                <StatCard icon={Activity}        label="Ongoing"          value={loading ? "…" : String(ongoingCount)}                                        sub="Currently in progress"                                                       color="#3B82F6" onClick={() => setStatModal("ongoing")} />
+                <StatCard icon={AlertTriangle}  label="Overdue"          value={loading ? "…" : String(overdueCount)}                                       sub={`Pending > ${OVERDUE_DAYS} days`}                                            color="#EF4444" onClick={() => setStatModal("overdue")} />
+                <StatCard icon={Hourglass}      label="Available"        value={loading ? "…" : String(availableCount)}                                     sub="Awaiting acceptance"                                                         color="#F59E0B" onClick={() => setStatModal("available")} />
+                <StatCard icon={FileText}       label="Total Referrals"  value={loading ? "…" : String(totalRefs)}                                          sub="All clinicians' referrals"                                                  color="#5B8AB8" onClick={() => setStatModal("total")} />
+                {/* Row 2: Status Issues & Performance Metrics */}
+                <StatCard icon={FilePlus}       label="Recently Created" value={loading ? "…" : String(recentlyCreatedCount)}                                 sub={loading ? "Last 7 days" : `${((recentlyCreatedCount / totalRefs) * 100).toFixed(1)}% of total`}               color="#10B981" onClick={() => setStatModal("recentlyCreated")} />
+                <StatCard icon={Repeat}         label="Re-referred"      value={loading ? "…" : String(rereferredCount)}                                     sub="Re-referred referrals"                                                       color="#A855F7" onClick={() => setStatModal("rereferred")} />
+                <StatCard icon={Pause}          label="Deferred"         value={loading ? "…" : String(deferredCount)}                                      sub="Deferred referrals"                                                          color="#F97316" onClick={() => setStatModal("deferred")} />
+                <StatCard icon={Ban}            label="Blacklisted"      value={loading ? "…" : String(blacklistedCount)}                                   sub="Blacklisted referrals"                                                       color="#374151" onClick={() => setStatModal("blacklisted")} />
+                <StatCard icon={TrendingUp}     label="Avg. Completion" value={loading ? "…" : (avgCompletionDays !== null ? `${avgCompletionDays}d` : "—")}  sub="Accepted → Completed"                                                       color="#059669" />
+                <StatCard icon={Clock}          label="Avg. Acceptance"  value={loading ? "…" : (avgAcceptanceDays !== null ? `${avgAcceptanceDays}d` : "—")} sub="Created → Accepted"                                                         color="#3B82F6" />
+              </div>
+            </div>
+
+            {/* Event Statistics Section */}
+            <div className="mb-6">
+              <h3 className="text-xs font-bold text-secondary uppercase tracking-wide mb-3 px-1">Event Statistics</h3>
+              <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 animate-enter-delay-2">
+                <StatCard icon={CalendarIcon}     label="Total Events"   value={loading ? "…" : String(allEvents.filter(e => e.source === "referral" || e.title?.startsWith("Referral Appointment")).length)}                                                    sub="Referral-linked events"                                                                                 color="#5B8AB8" />
+                <StatCard icon={CalendarIcon}     label="Scheduled"      value={loading ? "…" : String(allEvents.filter(e => (e.status === "scheduled" || !e.status) && (e.source === "referral" || e.title?.startsWith("Referral Appointment"))).length)}                    sub="Scheduled events"                                                                          color="#3B82F6" />
+                <StatCard icon={CheckCircle}    label="Treatment Rendered" value={loading ? "…" : String(allEvents.filter(e => e.status === "treatment_rendered" && (e.source === "referral" || e.title?.startsWith("Referral Appointment"))).length)}                 sub="Completed treatments"                                                                      color="#22C55E" />
+                <StatCard icon={X}              label="Canceled"       value={loading ? "…" : String(allEvents.filter(e => e.status === "canceled" && (e.source === "referral" || e.title?.startsWith("Referral Appointment"))).length)}                       sub="Canceled appointments"                                                                     color="#EF4444" />
+                <StatCard icon={RefreshCw}      label="Rescheduled"    value={loading ? "…" : String(allEvents.filter(e => e.status === "rescheduled" && (e.source === "referral" || e.title?.startsWith("Referral Appointment"))).length)}                    sub="Rescheduled appointments"                                                                  color="#F59E0B" />
+                <StatCard icon={AlertTriangle}  label="No Show"        value={loading ? "…" : String(allEvents.filter(e => e.status === "no_show" && (e.source === "referral" || e.title?.startsWith("Referral Appointment"))).length)}                       sub="Missed appointments"                                                                        color="#6B7280" />
+              </div>
             </div>
 
             {/* ── Divider between stat cards and charts ── */}
             <div className="h-px bg-secondary/20 mb-4" />
 
-            {/* ── Row 1: Performance per Clinician (1 col) + Efficiency Gap (2 col) ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4 animate-enter-delay-3">
+            {/* ── Chart-scope time-period filter ──
+                Sits between the divider and the first chart row. Only the
+                charts respond to this; the summary stat cards above always
+                reflect the all-time totals. */}
+            <div className="flex items-center justify-between gap-3 mb-4 animate-enter-delay-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                Chart Time Period
+                <span className="normal-case font-normal text-gray-400/80 ml-1">— filters charts only</span>
+              </p>
+              <div className="flex gap-1.5 bg-white rounded-lg border-2 border-[#87c4d8]/30 p-1 shadow-sm">
+                {(["week", "5weeks", "10weeks", "15weeks", "all"] as TimePeriod[]).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setTimePeriod(p)}
+                    className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
+                      timePeriod === p
+                        ? "bg-secondary text-white shadow"
+                        : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    }`}
+                  >
+                    {PERIOD_LABELS[p]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Row 1: Performance per Clinician (1/2) + Efficiency Gap (1/2) ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 animate-enter-delay-3">
               <ChartCard id="chart-perf-advisee" title="Performance per Clinician">
                 {performanceData.length > 0 ? (
-                  <div className="flex flex-col h-[260px]">
+                  <div className="flex flex-col h-[320px]">
                     {/* Search box */}
                     <div className="relative mb-2 px-1">
                       <input
                         type="text"
                         value={adviseeSearch}
                         onChange={e => setAdviseeSearch(e.target.value)}
-                        placeholder="All Advisees"
+                        placeholder="All Clinicians"
                         className="w-full text-[11px] rounded-md border border-[#87c4d8]/40 bg-[#87c4d8]/[0.06] px-2.5 py-1.5 pr-6 text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20 transition-all"
                       />
                       {adviseeSearch ? (
@@ -1820,15 +1949,15 @@ export default function ClinicalAdminAnalyticsDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <div className="h-[260px] flex items-center justify-center">
+                  <div className="h-[320px] flex items-center justify-center">
                     <p className="text-xs text-gray-400">No performance data available</p>
                   </div>
                 )}
               </ChartCard>
 
-              <ChartCard id="chart-efficiency-gap" title="Efficiency Gap" className="lg:col-span-2">
+              <ChartCard id="chart-efficiency-gap" title="Efficiency Gap">
                 {efficiencyGapRaw.rows.length > 0 ? (
-                  <div className="flex flex-col h-[260px]">
+                  <div className="flex flex-col h-[320px]">
                     {/* Controls row */}
                     <div className="flex items-center mb-2 px-1 gap-2">
                       {/* Advisee name filter */}
@@ -1839,7 +1968,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                           onChange={e => { setAdviseeFilter(e.target.value); setAdviseeFilterDropdownOpen(true); }}
                           onFocus={() => setAdviseeFilterDropdownOpen(true)}
                           onBlur={() => setTimeout(() => setAdviseeFilterDropdownOpen(false), 150)}
-                          placeholder="All Advisees"
+                          placeholder="All Clinicians"
                           className="w-full text-[10px] font-semibold rounded-md border border-[#87c4d8]/40 bg-[#87c4d8]/[0.06] px-2 py-1 pr-6 text-secondary placeholder-gray-400 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20 transition-all"
                         />
                         {adviseeFilter ? (
@@ -1972,7 +2101,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                             <div className="h-full flex items-center justify-center">
                               <p className="text-xs text-gray-400 text-center px-4">
                                 {efficiencyOutlierOnly
-                                  ? `No outliers — all advisees within ±${OUTLIER_THRESHOLD}d`
+                                  ? `No outliers — all clinicians within ±${OUTLIER_THRESHOLD}d`
                                   : "No data for this service"}
                               </p>
                             </div>
@@ -2033,7 +2162,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <div className="h-[260px] flex items-center justify-center">
+                  <div className="h-[320px] flex items-center justify-center">
                     <p className="text-xs text-gray-400">Need completed referrals to calculate efficiency</p>
                   </div>
                 )}
@@ -2043,7 +2172,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
 
             {/* ── Row 1.5: Section Referral Activity + Top Destination Sections ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4 animate-enter-delay-3">
-              <ChartCard id="chart-net-flow" title="Section Referral Activity" className="lg:col-span-2">
+              <ChartCard id="chart-net-flow" title="Section Referral Activity">
                 {netFlowData.length > 0 ? (
                   <div className="flex flex-col h-[260px]">
                     {/* Legend */}
@@ -2110,49 +2239,91 @@ export default function ClinicalAdminAnalyticsDashboard() {
                 )}
               </ChartCard>
 
-              <ChartCard id="chart-top-dest" title="Referral Acceptance per Section">
-                {topDestinationData.length > 0 ? (
-                  <div>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={topDestinationData} layout="vertical" barSize={22} margin={{ left: 10, right: 20, top: 5, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
-                        <XAxis type="number" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#6b7280", fontWeight: 600 }} axisLine={false} tickLine={false} width={70} />
-                        <Tooltip
-                          content={({ active, payload, label }: any) => {
-                            if (!active || !payload?.length) return null;
-                            const d = payload[0];
-                            return (
-                              <div className="bg-white border-2 border-[#87c4d8]/30 rounded-lg shadow-lg px-3 py-2">
-                                <p className="text-[11px] font-bold text-secondary">{label}</p>
-                                <p className="text-[11px]" style={{ color: d.payload?.fill }}>
-                                  {d.value} referral{d.value !== 1 ? "s" : ""}
-                                </p>
-                              </div>
-                            );
-                          }}
-                          cursor={{ fill: "#87c4d8", fillOpacity: 0.08 }}
-                        />
-                        <Bar dataKey="value" name="Referrals" radius={[0, 4, 4, 0]}>
-                          {topDestinationData.map((entry, i) => (
-                            <Cell key={i} fill={entry.fill} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-2">
-                      {topDestinationData.map((entry, i) => (
-                        <div key={i} className="flex items-center gap-1.5">
-                          <div className="h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: entry.fill }} />
-                          <span className="text-[9px] font-semibold text-gray-500">{entry.name}</span>
-                          <span className="text-[9px] font-bold text-secondary">{entry.value}</span>
+              <ChartCard id="chart-top-dest" title="Referral Treatment per Discipline" className="lg:col-span-2">
+                {referralTreatmentData.length > 0 ? (
+                  <div className="flex flex-col h-[260px]">
+                    {/* Search box */}
+                    <div className="relative mb-2 px-1">
+                      <input
+                        type="text"
+                        value={disciplineSearch}
+                        onChange={e => setDisciplineSearch(e.target.value)}
+                        placeholder="All Disciplines"
+                        className="w-full text-[11px] rounded-md border border-[#87c4d8]/40 bg-[#87c4d8]/[0.06] px-2.5 py-1.5 pr-6 text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20 transition-all"
+                      />
+                      {disciplineSearch ? (
+                        <button onClick={() => setDisciplineSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[10px] leading-none">✕</button>
+                      ) : (
+                        <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#87c4d8]" size={12} strokeWidth={2.5} />
+                      )}
+                      {disciplineSearch.trim() && (() => {
+                        const q = disciplineSearch.trim().toLowerCase();
+                        const suggestions = referralTreatmentData.filter(d => d.name.toLowerCase().includes(q) && d.name.toLowerCase() !== q);
+                        return suggestions.length > 0 ? (
+                          <div className="absolute z-20 left-1 right-1 top-full mt-0.5 bg-white border border-[#87c4d8]/30 rounded-md shadow-lg overflow-hidden">
+                            {suggestions.slice(0, 5).map((s, i) => (
+                              <button key={i} onClick={() => setDisciplineSearch(s.name)} className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-[#87c4d8]/10 transition-colors">{s.name}</button>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                    {/* Legend */}
+                    <div className="flex items-center gap-4 mb-2 px-1">
+                      {[{ label: "Referred", color: "#5B8AB8" }, { label: "Accepted", color: "#22C55E" }, { label: "Completed", color: "#059669" }].map(l => (
+                        <div key={l.label} className="flex items-center gap-1">
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: l.color }} />
+                          <span className="text-[9px] text-gray-500 font-medium">{l.label}</span>
                         </div>
                       ))}
                     </div>
+                    {/* Chart */}
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      {(() => {
+                        const filtered = disciplineSearch.trim()
+                          ? referralTreatmentData.filter(d => d.name.toLowerCase().includes(disciplineSearch.trim().toLowerCase()))
+                          : referralTreatmentData;
+                        if (filtered.length === 0) return (
+                          <div className="h-full flex items-center justify-center">
+                            <p className="text-xs text-gray-400">No match for &quot;{disciplineSearch}&quot;</p>
+                          </div>
+                        );
+                        return (
+                          <ResponsiveContainer width="100%" height={Math.max(180, filtered.length * 52)}>
+                            <BarChart data={filtered} layout="vertical" barSize={12} margin={{ left: 4, right: 24, top: 0, bottom: 0 }} barCategoryGap="35%">
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                              <XAxis type="number" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#6b7280", fontWeight: 600 }} axisLine={false} tickLine={false} width={110} />
+                              <Tooltip
+                                content={({ active, payload, label }: any) => {
+                                  if (!active || !payload?.length) return null;
+                                  return (
+                                    <div className="bg-white border-2 border-[#87c4d8]/30 rounded-lg shadow-lg px-3 py-2">
+                                      <p className="text-[11px] font-bold text-secondary mb-1">{label}</p>
+                                      {payload.map((p: any, i: number) => (
+                                        p.value > 0 && (
+                                          <p key={i} className="text-[11px]" style={{ color: p.fill }}>
+                                            {p.name}: <span className="font-bold">{p.value}</span>
+                                          </p>
+                                        )
+                                      ))}
+                                    </div>
+                                  );
+                                }}
+                                cursor={{ fill: "#87c4d8", fillOpacity: 0.08 }}
+                              />
+                              <Bar dataKey="Referred"  name="Referred"  stackId="a" fill="#5B8AB8" radius={[0, 0, 0, 0]} />
+                              <Bar dataKey="Accepted"  name="Accepted"  stackId="a" fill="#22C55E" radius={[0, 0, 0, 0]} />
+                              <Bar dataKey="Completed" name="Completed" stackId="a" fill="#059669" radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        );
+                      })()}
+                    </div>
                   </div>
                 ) : (
-                  <div className="h-[220px] flex items-center justify-center">
-                    <p className="text-xs text-gray-400">No destination data for this period</p>
+                  <div className="h-[260px] flex items-center justify-center">
+                    <p className="text-xs text-gray-400">No treatment data for this period</p>
                   </div>
                 )}
               </ChartCard>
@@ -2325,7 +2496,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                   })()}
                 </div>
                 {ageGroupData.some(d => d.value > 0) ? (
-                  <ResponsiveContainer width="100%" height={180}>
+                  <ResponsiveContainer width="100%" height={280}>
                     <BarChart data={ageGroupData} barSize={32}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                       <XAxis
@@ -2571,135 +2742,6 @@ export default function ClinicalAdminAnalyticsDashboard() {
               </ChartCard>
             </div>
 
-            {/* ── Row 5: Status Summary (full width) ──── */}
-            <div className="grid grid-cols-1 gap-4 mb-4 animate-enter-delay-4">
-              <ChartCard id="chart-exceptions" title="Referral Status Summary">
-                {exceptionHeatmap.length > 0 ? (
-                  <div className="flex flex-col h-[240px]">
-                    {/* Search box */}
-                    <div className="relative mb-2 px-1">
-                      <input
-                        type="text"
-                        value={heatSearch}
-                        onChange={e => setHeatSearch(e.target.value)}
-                        placeholder="All Advisees"
-                        className="w-full text-[10px] font-semibold rounded-md border border-[#87c4d8]/40 bg-[#87c4d8]/[0.06] px-2 py-1 pr-6 text-secondary placeholder-gray-400 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20 transition-all"
-                      />
-                      {heatSearch ? (
-                        <button onClick={() => setHeatSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[10px] leading-none">✕</button>
-                      ) : (
-                        <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#87c4d8]" size={11} strokeWidth={2.5} />
-                      )}
-                      {heatSearch.trim() && (() => {
-                        const q = heatSearch.trim().toLowerCase();
-                        const suggestions = exceptionHeatmap.filter(r => r.name.toLowerCase().includes(q) && r.name.toLowerCase() !== q);
-                        return suggestions.length > 0 ? (
-                          <div className="absolute z-30 left-1 right-1 top-full mt-0.5 bg-white border border-[#87c4d8]/30 rounded-md shadow-lg overflow-hidden">
-                            {suggestions.slice(0, 5).map((s, i) => (
-                              <button key={i} onClick={() => setHeatSearch(s.name)} className="w-full text-left px-3 py-1.5 text-[10px] text-gray-700 hover:bg-[#87c4d8]/10 transition-colors">{s.name}</button>
-                            ))}
-                          </div>
-                        ) : null;
-                      })()}
-                    </div>
-                    {/* Intensity legend */}
-                    <div className="flex items-center gap-3 mb-2 px-1">
-                      <span className="text-[9px] text-gray-400 font-semibold">Intensity:</span>
-                      {[
-                        { label: "0", bg: "#f3f4f6" },
-                        { label: "1–2", bg: "#fecaca" },
-                        { label: "3–4", bg: "#f87171" },
-                        { label: "5+", bg: "#b91c1c" },
-                      ].map(({ label, bg }) => (
-                        <div key={label} className="flex items-center gap-1">
-                          <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: bg }} />
-                          <span className="text-[9px] text-gray-400">{label}</span>
-                        </div>
-                      ))}
-                      <span className="text-[9px] text-gray-300 ml-auto italic">click cell to drill down</span>
-                    </div>
-                    {/* Heatmap grid */}
-                    <div className="flex-1 min-h-0 overflow-auto">
-                      <table className="w-full border-collapse text-[9px]">
-                        <thead>
-                          <tr>
-                            <th className="sticky left-0 bg-white z-10 text-left pr-3 pb-1.5 font-semibold text-gray-400 w-[72px]">Advisee</th>
-                            {EXCEPTION_COLS.map(col => (
-                              <th key={col.key} className="pb-1.5 font-semibold text-center whitespace-nowrap px-1" style={{ color: col.color }}>{col.label}</th>
-                            ))}
-                            <th className="pb-1.5 font-semibold text-center text-gray-400 px-1">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {exceptionHeatmap.filter(r => !heatSearch.trim() || r.name.toLowerCase().includes(heatSearch.trim().toLowerCase())).map(row => {
-                            const heatBg = (val: number) => {
-                              if (val === 0) return "#f3f4f6";
-                              if (val <= 2)  return "#fecaca";
-                              if (val <= 4)  return "#f87171";
-                              return "#b91c1c";
-                            };
-                            const heatText = (val: number) => val >= 3 ? "#fff" : val > 0 ? "#7f1d1d" : "#d1d5db";
-                            return (
-                              <tr key={row.name}>
-                                <td className="sticky left-0 bg-white z-10 pr-3 py-0.5 font-semibold text-gray-600 truncate max-w-[72px]" title={row.name}>{row.name}</td>
-                                {EXCEPTION_COLS.map(col => {
-                                  const val = row[col.key as keyof typeof row] as number;
-                                  const isSelected = heatSelectedCell?.advisee === row.name && heatSelectedCell?.colKey === col.key;
-                                  return (
-                                    <td key={col.key} className="py-0.5 px-1 text-center">
-                                      <div
-                                        onClick={() => setHeatSelectedCell(val > 0 ? (isSelected ? null : { advisee: row.name, colKey: col.key }) : null)}
-                                        className={`rounded mx-auto flex items-center justify-center font-bold transition-all ${val > 0 ? "cursor-pointer hover:ring-2 hover:ring-offset-1" : "cursor-default"} ${isSelected ? "ring-2 ring-offset-1 ring-gray-400" : ""}`}
-                                        style={{ backgroundColor: heatBg(val), color: heatText(val), width: 32, height: 22, fontSize: 9, ringColor: col.color }}
-                                        title={`${row.name} — ${col.label}: ${val}`}
-                                      >
-                                        {val > 0 ? val : ""}
-                                      </div>
-                                    </td>
-                                  );
-                                })}
-                                <td className="py-0.5 px-1 text-center">
-                                  <span className={`text-[9px] font-bold ${row.total >= 5 ? "text-red-700" : row.total >= 3 ? "text-orange-500" : "text-gray-400"}`}>{row.total || ""}</span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Drill-down panel */}
-                    {heatSelectedCell && (() => {
-                      const row = exceptionHeatmap.find(r => r.name === heatSelectedCell.advisee);
-                      const items = row?.details[heatSelectedCell.colKey] || [];
-                      const col = EXCEPTION_COLS.find(c => c.key === heatSelectedCell.colKey)!;
-                      return items.length > 0 ? (
-                        <div className="mt-2 border-t border-gray-100 pt-2">
-                          <div className="flex items-center justify-between mb-1 px-1">
-                            <p className="text-[10px] font-bold text-gray-600">
-                              {heatSelectedCell.advisee} — <span style={{ color: col.color }}>{col.label}</span>
-                              <span className="text-gray-400 font-normal ml-1">({items.length} case{items.length !== 1 ? "s" : ""})</span>
-                            </p>
-                            <button onClick={() => setHeatSelectedCell(null)} className="text-[9px] text-gray-400 hover:text-gray-600">✕</button>
-                          </div>
-                          <div className="space-y-1 max-h-[80px] overflow-y-auto">
-                            {items.map((item, i) => (
-                              <div key={i} className="flex items-center gap-2 bg-gray-50 rounded px-2 py-1 border border-gray-100">
-                                <span className="text-[9px] font-mono text-gray-500 flex-shrink-0">{item.chart}</span>
-                                <span className="text-[9px] text-gray-600 truncate">{item.detail}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null;
-                    })()}
-                  </div>
-                ) : (
-                  <div className="h-[240px] flex items-center justify-center">
-                    <p className="text-xs text-gray-400">No exceptions or alerts found</p>
-                  </div>
-                )}
-              </ChartCard>
-            </div>
 
 
 

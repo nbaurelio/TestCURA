@@ -22,6 +22,12 @@ interface Event {
   advisee_name?: string;
 }
 
+// Cap the sidebar planner to a single screen of upcoming items so it never
+// dwarfs the rest of the homepage. Favourites already float to the top via
+// the `is_favorite` sort, so this slice keeps a balanced mix of favourites
+// + nearest-upcoming events.
+const MAX_UPCOMING_EVENTS = 10;
+
 interface SchedulePlannerProps {
   userName?: string;
   refreshKey?: number;
@@ -67,8 +73,12 @@ export function SchedulePlanner({
   const loadEvents = useCallback(async (currentAdvisees?: Profile[], profId?: string, clinicalAdmin?: boolean, caId?: string) => {
     try {
       if (clinicalAdmin && caId) {
-        const [allData, overrides] = await Promise.all([
+        // Clinic-wide referral feed + the chair/admin's own personal events.
+        // Mirror the full schedule page so the sidebar widget never silently
+        // drops calendar entries the user created via the "+" button.
+        const [allData, ownData, overrides] = await Promise.all([
           getAllReferralEvents(),
+          getEvents(false),
           getEventOverrides(caId),
         ]);
         const now = new Date();
@@ -89,6 +99,12 @@ export function SchedulePlanner({
             advisee_name: nameMap[e.user_id] || "Clinician",
           };
         });
+        // Merge own personal events, deduping by id (own referral events are
+        // already in `allEvents`).
+        const seen = new Set(allEvents.map(e => e.id));
+        (ownData || []).forEach((e: any) => {
+          if (!seen.has(e.id)) allEvents.push({ ...e });
+        });
         const upcomingEvents = allEvents
           .filter(event => new Date(event.end_time) > now)
           .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
@@ -97,7 +113,7 @@ export function SchedulePlanner({
           if (!a.is_favorite && b.is_favorite) return 1;
           return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
         });
-        setEvents(combined);
+        setEvents(combined.slice(0, MAX_UPCOMING_EVENTS));
         setLoading(false);
         return;
       }
@@ -147,7 +163,7 @@ export function SchedulePlanner({
         return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
       });
 
-      setEvents(combined);
+      setEvents(combined.slice(0, MAX_UPCOMING_EVENTS));
     } catch (error) {
       console.error("Error loading events:", error);
     } finally {

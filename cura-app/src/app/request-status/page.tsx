@@ -7,13 +7,14 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProfileCard } from "@/components/sidebar/ProfileCard";
 import { SchedulePlanner } from "@/components/sidebar/SchedulePlanner";
-import { getReferrals, Referral, updateReferral, cancelDeletionRequest, submitDeletionRequest, submitEditRequest } from "@/lib/api/referrals";
+import { getReferrals, Referral, updateReferral, cancelDeletionRequest, submitDeletionRequest, submitEditRequest, sendBackToSystem } from "@/lib/api/referrals";
 import { getCurrentUserId, getProfile } from "@/lib/api/profiles";
 import { supabase } from "@/lib/supabase";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ViewDetailsModal } from "@/components/modals/ViewDetailsModal";
+import { EditReferralModal } from "@/components/modals/EditReferralModal";
 
-type RequestFilter = "ALL" | "EDIT" | "DELETION" | "DEFERRAL" | "BLACKLISTED";
+type RequestFilter = "ALL" | "EDIT" | "DELETION" | "REREFERRAL" | "DEFERRAL" | "BLACKLISTED" | "COMPLETED";
 
 const STATUS_BADGE: Record<string, string> = {
   pending:  "bg-yellow-100 text-yellow-700 border border-yellow-400",
@@ -30,10 +31,15 @@ export default function RequestStatusPage() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
   const [confirmAction, setConfirmAction] = useState<{ label: string; description: string; onConfirm: () => Promise<void> } | null>(null);
   const [resubmitDialog, setResubmitDialog] = useState<{ label: string; referralId: string; type: "Edit" | "Deletion"; oldReason: string } | null>(null);
   const [resubmitReason, setResubmitReason] = useState("");
   const [selectedReferral, setSelectedReferral] = useState<Referral | null>(null);
+  const [referralToEdit, setReferralToEdit] = useState<Referral | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +54,7 @@ export default function RequestStatusPage() {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (filterRef.current && !filterRef.current.contains(e.target as Node)) setIsFilterOpen(false);
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setIsSortOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -77,8 +84,8 @@ export default function RequestStatusPage() {
     const professorIds = new Set<string>();
     referrals.forEach(r => {
       (r.edit_request_professor_ids || []).forEach((id: string) => professorIds.add(id));
-      ((r as any).deletion_request_professor_ids || []).forEach((id: string) => professorIds.add(id));
-      ((r as any).status_change_professor_ids || []).forEach((id: string) => professorIds.add(id));
+      (r.deletion_request_professor_ids || []).forEach((id: string) => professorIds.add(id));
+      (r.status_change_professor_ids || []).forEach((id: string) => professorIds.add(id));
     });
     if (professorIds.size === 0) return;
     Promise.all(
@@ -117,7 +124,7 @@ export default function RequestStatusPage() {
   const rows = useMemo(() => {
     const result: {
       referral: Referral;
-      reqType: "Edit" | "Deletion" | "Deferral" | "Blacklisted";
+      reqType: "Edit" | "Deletion" | "Rereferral" | "Deferral" | "Blacklisted" | "Completion";
       reason: string;
       declineReason: string | null;
       reqStatus: string;
@@ -126,40 +133,67 @@ export default function RequestStatusPage() {
 
     referrals.forEach(r => {
       const isCreator  = r.user_id === currentUserId;
-      const isAcceptor = (r as any).accepted_by_user_id === currentUserId;
+      const isAcceptor = r.accepted_by_user_id === currentUserId;
 
       if (isCreator) {
-        if (r.edit_request_status && r.edit_request_reason) {
+        // Show edit requests (exclude completed ones - after send back to system)
+        if (r.edit_request_status && r.edit_request_reason && r.edit_request_status !== "completed") {
           result.push({ referral: r, reqType: "Edit", reason: r.edit_request_reason, declineReason: r.edit_request_decline_reason || null, reqStatus: r.edit_request_status, professorIds: r.edit_request_professor_ids || [] });
         }
-        if ((r as any).deletion_request_status && (r as any).deletion_request_reason) {
-          result.push({ referral: r, reqType: "Deletion", reason: (r as any).deletion_request_reason, declineReason: (r as any).deletion_request_decline_reason || null, reqStatus: (r as any).deletion_request_status, professorIds: (r as any).deletion_request_professor_ids || [] });
+        // Show deletion requests
+        if (r.deletion_request_status && r.deletion_request_reason) {
+          result.push({ referral: r, reqType: "Deletion", reason: r.deletion_request_reason, declineReason: r.deletion_request_decline_reason || null, reqStatus: r.deletion_request_status, professorIds: r.deletion_request_professor_ids || [] });
         }
       }
 
       if (isAcceptor) {
-        const rawSCR: string = (r as any).status_change_reason || "";
+        // Show rereferral requests (pending or approved, exclude completed - after send back to system)
+        if (r.rerefer_request_status && r.rerefer_request_reason && r.rerefer_request_status !== "completed") {
+          result.push({ referral: r, reqType: "Rereferral", reason: r.rerefer_request_reason, declineReason: null, reqStatus: r.rerefer_request_status, professorIds: r.rerefer_request_professor_ids || [] });
+        }
+      }
+
+      if (isAcceptor) {
+        const rawSCR: string = r.status_change_reason || "";
         if (rawSCR) {
-          // Pending deferral/blacklist request (not yet approved)
+          // Pending deferral/blacklist/completion request (not yet approved)
           const parts = rawSCR.includes("::") ? rawSCR.split("::") : ["deferred", rawSCR];
           const target = parts[0];
           const cleanReason = parts.slice(1).join("::");
           if (target === "deferred") {
-            result.push({ referral: r, reqType: "Deferral", reason: cleanReason, declineReason: null, reqStatus: "pending", professorIds: (r as any).status_change_professor_ids || [] });
+            result.push({ referral: r, reqType: "Deferral", reason: cleanReason, declineReason: null, reqStatus: "pending", professorIds: r.status_change_professor_ids || [] });
           } else if (target === "blacklisted") {
-            result.push({ referral: r, reqType: "Blacklisted", reason: cleanReason, declineReason: null, reqStatus: "pending", professorIds: (r as any).status_change_professor_ids || [] });
+            result.push({ referral: r, reqType: "Blacklisted", reason: cleanReason, declineReason: null, reqStatus: "pending", professorIds: r.status_change_professor_ids || [] });
+          } else if (target === "completed") {
+            result.push({ referral: r, reqType: "Completion", reason: cleanReason, declineReason: null, reqStatus: "pending", professorIds: r.status_change_professor_ids || [] });
           }
         }
       }
     });
 
-    return result.sort((a, b) => new Date(b.referral.created_at).getTime() - new Date(a.referral.created_at).getTime());
-  }, [referrals, currentUserId]);
+    const getReqTs = (row: typeof result[0]) => {
+      const r = row.referral;
+      switch (row.reqType) {
+        case "Edit":       return r.edit_requested_at ?? r.created_at;
+        case "Deletion":   return r.deletion_requested_at ?? r.created_at;
+        case "Rereferral": return r.rerefer_requested_at ?? r.created_at;
+        case "Deferral":
+        case "Blacklisted":
+        case "Completion": return r.status_change_requested_at ?? r.created_at;
+        default:           return r.created_at;
+      }
+    };
+    return result.sort((a, b) =>
+      sortOrder === "newest"
+        ? new Date(getReqTs(b)).getTime() - new Date(getReqTs(a)).getTime()
+        : new Date(getReqTs(a)).getTime() - new Date(getReqTs(b)).getTime()
+    );
+  }, [referrals, currentUserId, sortOrder]);
 
   const filtered = useMemo(() => {
     let list = rows;
     if (filter !== "ALL") {
-      const map: Record<RequestFilter, string> = { ALL: "", EDIT: "Edit", DELETION: "Deletion", DEFERRAL: "Deferral", BLACKLISTED: "Blacklisted" };
+      const map: Record<RequestFilter, string> = { ALL: "", EDIT: "Edit", DELETION: "Deletion", REREFERRAL: "Rereferral", DEFERRAL: "Deferral", BLACKLISTED: "Blacklisted", COMPLETED: "Completion" };
       list = list.filter(row => row.reqType === map[filter]);
     }
     if (searchQuery.trim()) {
@@ -185,14 +219,18 @@ export default function RequestStatusPage() {
   const TYPE_STYLE: Record<string, string> = {
     Edit:        "bg-amber-100 text-amber-700 border border-amber-400",
     Deletion:    "bg-red-100 text-red-700 border border-red-400",
+    Rereferral:   "bg-blue-100 text-blue-700 border border-blue-400",
     Deferral:    "bg-orange-100 text-orange-700 border border-orange-400",
     Blacklisted: "bg-gray-800 text-white",
+    Completion:  "bg-green-100 text-green-700 border border-green-400",
   };
 
   const FILTER_TABS: { label: string; value: RequestFilter }[] = [
     { label: "All",        value: "ALL"        },
+    { label: "Rereferral", value: "REREFERRAL" },
     { label: "Edit",       value: "EDIT"       },
     { label: "Deletion",   value: "DELETION"   },
+    { label: "Completion", value: "COMPLETED"  },
     { label: "Deferral",   value: "DEFERRAL"   },
     { label: "Blacklisted",value: "BLACKLISTED"},
   ];
@@ -224,7 +262,34 @@ export default function RequestStatusPage() {
             </Link>
 
             <div className="bg-secondary text-white text-sm font-bold py-3 px-5 rounded shadow mb-4 uppercase tracking-wide flex items-center justify-between">
-              <span>Requests Referrals</span>
+              <span>Request Status</span>
+              <div className="flex items-center gap-2">
+              <div ref={sortRef} className="relative normal-case tracking-normal">
+                <button
+                  type="button"
+                  onClick={() => setIsSortOpen(p => !p)}
+                  className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 transition-colors text-white text-[11px] font-bold uppercase tracking-wide px-3 py-1.5 rounded border border-white/30"
+                >
+                  <span>Sort by: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isSortOpen && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden min-w-[120px]">
+                    {(["newest", "oldest"] as const).map(opt => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
+                          sortOrder === opt ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"
+                        }`}
+                      >
+                        {opt === "newest" ? "Newest" : "Oldest"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div ref={filterRef} className="relative">
                 <button
                   type="button"
@@ -252,6 +317,7 @@ export default function RequestStatusPage() {
                     ))}
                   </div>
                 )}
+              </div>
               </div>
             </div>
 
@@ -293,6 +359,12 @@ export default function RequestStatusPage() {
                           label: "Cancel Request", className: "text-red-600",
                           onClick: () => askConfirm("Cancel Edit Request", "Are you sure you want to cancel this edit request?", () => cancelEditRequest(r.id))
                         });
+                        if (row.reqStatus === "approved") {
+                          menuItems.push({
+                            label: "Edit", className: "text-blue-600",
+                            onClick: () => { setReferralToEdit(r); setIsEditModalOpen(true); setOpenMenuId(null); }
+                          });
+                        }
                         if (isDeclined) {
                           menuItems.push({
                             label: "Re-submit Edit Request", className: "text-blue-600",
@@ -314,13 +386,41 @@ export default function RequestStatusPage() {
                             label: "Re-submit Deletion Request", className: "text-blue-600",
                             onClick: () => { setResubmitReason(row.reason || ""); setResubmitDialog({ label: "Re-submit Deletion Request", referralId: r.id, type: "Deletion", oldReason: row.reason }); }
                           });
+                          menuItems.push({
+                            label: "Cancel Request", className: "text-red-600",
+                            onClick: () => askConfirm("Cancel Deletion Request", "Are you sure you want to cancel this deletion request?", () => cancelDeletionRequest(r.id).then(() => loadReferrals()))
+                          });
                         }
                       }
-                      if (row.reqType === "Deferral" || row.reqType === "Blacklisted") {
+                      if (row.reqType === "Deferral" || row.reqType === "Blacklisted" || row.reqType === "Completion") {
                         if (isPending) menuItems.push({
                           label: "Cancel Request", className: "text-red-600",
                           onClick: () => askConfirm("Cancel Status Change Request", "Are you sure you want to cancel this status change request?", () => cancelStatusChangeRequest(r.id))
                         });
+                      }
+                      if (row.reqType === "Rereferral") {
+                        if (isPending) menuItems.push({
+                          label: "Cancel Request", className: "text-red-600",
+                          onClick: () => askConfirm("Cancel Rereferral Request", "Are you sure you want to cancel this rereferral request?", async () => {
+                            await (supabase.from("referrals") as any)
+                              .update({ rerefer_request_reason: null, rerefer_request_status: null, rerefer_request_professor_ids: null } as any)
+                              .eq("id", r.id);
+                            await loadReferrals();
+                          })
+                        });
+                        if (row.reqStatus === "approved") {
+                          menuItems.push({
+                            label: "Edit", className: "text-blue-600",
+                            onClick: () => { setReferralToEdit(r); setIsEditModalOpen(true); setOpenMenuId(null); }
+                          });
+                          menuItems.push({
+                            label: "Send back to System", className: "text-green-600",
+                            onClick: () => askConfirm("Send Back to System", "Are you sure you want to send this referral back to the system? This will make it available for other clinicians to accept.", async () => {
+                              await sendBackToSystem(r.id);
+                              await loadReferrals();
+                            })
+                          });
+                        }
                       }
 
                       return (
@@ -418,6 +518,24 @@ export default function RequestStatusPage() {
     </div>
 
     <ViewDetailsModal referral={selectedReferral} isOpen={!!selectedReferral} onClose={() => setSelectedReferral(null)} />
+
+    {/* Edit Referral Modal */}
+    <EditReferralModal
+      referral={referralToEdit}
+      isOpen={isEditModalOpen}
+      onClose={() => { setIsEditModalOpen(false); setReferralToEdit(null); }}
+      onSave={async (id, updates) => {
+        // Clear edit request fields after the user edits the referral
+        await updateReferral(id, { ...updates, edit_request_reason: null, edit_request_status: null } as any);
+        // If this was an approved rereferral, send the referral back to the system
+        if (referralToEdit?.rerefer_request_status === "approved") {
+          try { await sendBackToSystem(id); } catch (e) { console.error("Error sending back to system:", e); }
+        }
+        await loadReferrals();
+        setIsEditModalOpen(false);
+        setReferralToEdit(null);
+      }}
+    />
 
     {/* Re-submit Dialog */}
     {resubmitDialog && (

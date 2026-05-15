@@ -10,6 +10,7 @@ import { getReferrals, Referral, deleteReferral, approveReferral, approveEditReq
 import { supabase } from "@/lib/supabase";
 import { getProfile, getCurrentUserId } from "@/lib/api/profiles";
 import { ViewDetailsModal } from "@/components/modals/ViewDetailsModal";
+import { EditReferralModal } from "@/components/modals/EditReferralModal";
 import { ChevronDown, MoreHorizontal, CheckCircle } from "lucide-react";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { UserProfilePopover } from "@/components/ui/UserProfilePopover";
@@ -40,6 +41,8 @@ export default function ClinicalAdminDashboard() {
   const [referralToDecline, setReferralToDecline] = useState<string | null>(null);
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [selectedReferralForDetails, setSelectedReferralForDetails] = useState<Referral | null>(null);
+  const [referralToEdit, setReferralToEdit] = useState<Referral | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isApproveEditOpen, setIsApproveEditOpen] = useState(false);
   const [isDeclineEditOpen, setIsDeclineEditOpen] = useState(false);
   const [editRequestToAction, setEditRequestToAction] = useState<string | null>(null);
@@ -50,7 +53,7 @@ export default function ClinicalAdminDashboard() {
   const [isDeclineStatusChangeOpen, setIsDeclineStatusChangeOpen] = useState(false);
   const [statusChangeToAction, setStatusChangeToAction] = useState<string | null>(null);
   const [statusChangeTarget, setStatusChangeTarget] = useState<string>("deferred");
-  const [statusRequestFilter, setStatusRequestFilter] = useState<"ALL" | "EDIT" | "DELETION" | "REREFERRAL" | "DEFERRAL" | "BLACKLISTED">("ALL");
+  const [statusRequestFilter, setStatusRequestFilter] = useState<"ALL" | "EDIT" | "DELETION" | "REREFERRAL" | "DEFERRAL" | "BLACKLISTED" | "COMPLETED">("ALL");
   const [isStatusRequestFilterOpen, setIsStatusRequestFilterOpen] = useState(false);
   const statusRequestFilterRef = useRef<HTMLDivElement>(null);
   const [isDeclineRereferOpen, setIsDeclineRereferOpen] = useState(false);
@@ -69,6 +72,9 @@ export default function ClinicalAdminDashboard() {
   const [adminSection, setAdminSection] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCategory, setSearchCategory] = useState("medical_alert");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -79,6 +85,8 @@ export default function ClinicalAdminDashboard() {
       const insideSectionDesktop = sectionDropdownRef.current?.contains(target);
       const insideSectionMobile = sectionDropdownMobileRef.current?.contains(target);
       if (!insideSectionDesktop && !insideSectionMobile) setSectionDropdownOpen(false);
+      const insideSort = sortRef.current?.contains(target);
+      if (!insideSort) setIsSortOpen(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -167,24 +175,41 @@ export default function ClinicalAdminDashboard() {
     }
     if (requestType === "STATUS_REQUESTS") {
       filtered = filtered.filter(ref => {
-        const rawReason: string = (ref as any).status_change_reason || "";
+        const rawReason: string = ref.status_change_reason || "";
         const scTarget = rawReason.includes("::") ? rawReason.split("::")[0] : "";
         const isRerefer = ref.rerefer_request_status === "pending" && !!ref.rerefer_request_reason;
         const isEdit = ref.edit_request_status === "pending" && !!ref.edit_request_reason;
         const isDeletion = ref.deletion_request_status === "pending" && !!ref.deletion_request_reason;
         const isDeferral = !!rawReason && scTarget === "deferred";
         const isBlacklisted = !!rawReason && scTarget === "blacklisted";
-        return statusRequestFilter === "ALL" ? (isRerefer || isEdit || isDeletion || isDeferral || isBlacklisted) :
+        const isCompleted = !!rawReason && scTarget === "completed";
+        return statusRequestFilter === "ALL" ? (isRerefer || isEdit || isDeletion || isDeferral || isBlacklisted || isCompleted) :
           statusRequestFilter === "REREFERRAL" ? isRerefer :
           statusRequestFilter === "EDIT" ? isEdit :
           statusRequestFilter === "DELETION" ? isDeletion :
           statusRequestFilter === "DEFERRAL" ? isDeferral :
-          statusRequestFilter === "BLACKLISTED" ? isBlacklisted : false;
+          statusRequestFilter === "BLACKLISTED" ? isBlacklisted :
+          statusRequestFilter === "COMPLETED" ? isCompleted : false;
       });
     }
 
-    return filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [referrals, activeStatus, requestType, showMySection, adminSection, sectionFilterMode, statusRequestFilter]);
+    const getRequestTs = (r: any): number => {
+      if (requestType === "REREFERRALS" || (requestType === "STATUS_REQUESTS" && r.rerefer_request_status === "pending" && r.rerefer_request_reason))
+        return new Date(r.rerefer_requested_at || r.created_at).getTime();
+      if (requestType === "DELETION_REQUESTS" || (requestType === "STATUS_REQUESTS" && r.deletion_request_status === "pending" && r.deletion_request_reason))
+        return new Date(r.deletion_requested_at || r.created_at).getTime();
+      if (requestType === "EDIT_REQUESTS" || (requestType === "STATUS_REQUESTS" && r.edit_request_status === "pending" && r.edit_request_reason))
+        return new Date(r.edit_requested_at || r.created_at).getTime();
+      if (requestType === "STATUS_REQUESTS" && r.status_change_reason)
+        return new Date(r.status_change_requested_at || r.created_at).getTime();
+      return new Date(r.created_at).getTime();
+    };
+    return filtered.sort((a, b) => {
+      const aTs = getRequestTs(a);
+      const bTs = getRequestTs(b);
+      return sortOrder === "newest" ? bTs - aTs : aTs - bTs;
+    });
+  }, [referrals, activeStatus, requestType, showMySection, adminSection, sectionFilterMode, statusRequestFilter, sortOrder]);
 
   const blacklistedChartNumbers = useMemo(() =>
     new Set(referrals.filter(r => r.referral_status?.toLowerCase() === "blacklisted" && r.chart_number).map(r => r.chart_number!)),
@@ -409,13 +434,52 @@ export default function ClinicalAdminDashboard() {
     [referrals]
   );
   const deletionRequestCount = useMemo(() =>
-    referrals.filter(ref => (ref as any).deletion_request_status === "pending").length,
+    referrals.filter(ref => ref.deletion_request_status === "pending").length,
     [referrals]
   );
+  // Requests Status badge: count UNIQUE referrals that surface in the
+  // STATUS_REQUESTS tab — any pending Rereferral, Edit, Deletion, Deferral
+  // or Blacklist request. Mirrors `filteredReferrals` so the badge always
+  // equals the tab's row count.
   const statusRequestCount = useMemo(() =>
-    referrals.filter(ref => !!(ref as any).status_change_reason).length,
+    referrals.filter(ref => {
+      const isRerefer = ref.rerefer_request_status === "pending" && !!ref.rerefer_request_reason;
+      const isEdit = ref.edit_request_status === "pending" && !!ref.edit_request_reason;
+      const isDeletion = ref.deletion_request_status === "pending" && !!ref.deletion_request_reason;
+      const isStatusChange = !!ref.status_change_reason;
+      return isRerefer || isEdit || isDeletion || isStatusChange;
+    }).length,
     [referrals]
   );
+  // Per-sub-filter counts rendered as red circle badges inside the Status
+  // Requests dropdown so the admin knows at a glance which filters have
+  // pending work. Deferral vs Blacklist is determined by the prefix in
+  // `status_change_reason` ("deferred::<reason>" | "blacklisted::<reason>").
+  const statusRequestSubCounts = useMemo(() => {
+    const deferralCount = referrals.filter(ref => {
+      const r = ref.status_change_reason;
+      return !!r && (r.startsWith("deferred::") || !r.includes("::"));
+    }).length;
+    const blacklistCount = referrals.filter(ref => {
+      const r = ref.status_change_reason;
+      return !!r && r.startsWith("blacklisted::");
+    }).length;
+    const completedCount = referrals.filter(ref => {
+      const r = ref.status_change_reason;
+      return !!r && r.startsWith("completed::");
+    }).length;
+    return {
+      // `statusRequestCount` already counts unique referrals across all six
+      // request types, so it IS the total — no double-summing needed.
+      ALL: statusRequestCount,
+      REREFERRAL: rereferralCount,
+      EDIT: editRequestCount,
+      DELETION: deletionRequestCount,
+      DEFERRAL: deferralCount,
+      BLACKLISTED: blacklistCount,
+      COMPLETED: completedCount,
+    } as Record<"ALL" | "REREFERRAL" | "EDIT" | "DELETION" | "DEFERRAL" | "BLACKLISTED" | "COMPLETED", number>;
+  }, [referrals, statusRequestCount, rereferralCount, editRequestCount, deletionRequestCount]);
   const requestCounts: Record<RequestType, number | undefined> = {
     ALL: undefined,
     REREFERRALS: rereferralCount,
@@ -439,10 +503,50 @@ export default function ClinicalAdminDashboard() {
   const confirmApproveStatusChange = async () => {
     if (!statusChangeToAction) return;
     try {
-      const { error } = await (supabase.from("referrals") as any)
-        .update({ referral_status: statusChangeTarget, status_change_reason: null, status_change_professor_ids: null } as any)
-        .eq("id", statusChangeToAction);
+      const adminId = getCurrentUserId();
+      const { data: updated, error } = await (supabase.from("referrals") as any)
+        .update({
+          referral_status: statusChangeTarget,
+          referral_status_changed_at: new Date().toISOString(),
+          status_change_reason: null,
+          status_change_professor_ids: null,
+          status_change_approved_by: adminId,
+        } as any)
+        .eq("id", statusChangeToAction)
+        .select()
+        .single();
       if (error) { alert("Failed to approve: " + error.message); return; }
+
+      try {
+        await (supabase.from("activity_logs") as any).insert({
+          user_id: adminId,
+          action: "CHANGE_REFERRAL_STATUS",
+          description: `YOU APPROVED STATUS CHANGE TO ${statusChangeTarget.toUpperCase()} - Chart: ${updated?.chart_number || "N/A"}`,
+          metadata: JSON.stringify({
+            referral_id: statusChangeToAction,
+            chart_number: updated?.chart_number,
+            new_status: statusChangeTarget,
+            approved_via: "status_change_request",
+          }),
+        } as any);
+      } catch (logErr) {
+        console.warn("Could not write status change activity log:", logErr);
+      }
+
+      // Flip linked calendar events to `treatment_rendered` when the
+      // approved target is "completed" — keeps the schedule in sync with
+      // the referral's new status.
+      if (statusChangeTarget === "completed") {
+        try {
+          const { markReferralEventsTreatmentRendered } = await import("@/lib/api/events");
+          await markReferralEventsTreatmentRendered(updated?.chart_number || null);
+        } catch (evErr) {
+          console.warn("Could not mark referral events as treatment_rendered:", evErr);
+        }
+      }
+
+      const { clearReferralsCache } = await import("@/lib/api/referrals");
+      clearReferralsCache();
       setIsApproveStatusChangeOpen(false);
       setStatusChangeToAction(null);
       await loadData();
@@ -454,10 +558,48 @@ export default function ClinicalAdminDashboard() {
 
   const confirmDeclineStatusChange = async () => {
     if (!statusChangeToAction) return;
+    if (!declineReason.trim()) return;
     try {
+      const adminId = getCurrentUserId();
+      // Capture the requested target and chart number BEFORE clearing
+      // `status_change_reason`, so we can attribute the decline log to the
+      // exact target the clinician asked for (deferred / blacklisted /
+      // completed).
+      const { data: refBefore } = await (supabase.from("referrals") as any)
+        .select("chart_number, status_change_reason")
+        .eq("id", statusChangeToAction)
+        .single();
+      const reasonStr: string = (refBefore as any)?.status_change_reason || "";
+      const declinedTarget = reasonStr.includes("::") ? reasonStr.split("::")[0] : statusChangeTarget;
+
       await (supabase.from("referrals") as any)
-        .update({ referral_status: "ongoing", status_change_reason: null, status_change_professor_ids: null } as any)
+        .update({
+          referral_status: "ongoing",
+          status_change_reason: null,
+          status_change_professor_ids: null,
+          status_change_decline_reason: declineReason.trim(),
+        } as any)
         .eq("id", statusChangeToAction);
+
+      try {
+        await (supabase.from("activity_logs") as any).insert({
+          user_id: adminId,
+          action: "CHANGE_REFERRAL_STATUS",
+          description: `DECLINED STATUS CHANGE TO ${declinedTarget.toUpperCase()} - Chart: ${(refBefore as any)?.chart_number || "N/A"}`,
+          metadata: JSON.stringify({
+            referral_id: statusChangeToAction,
+            chart_number: (refBefore as any)?.chart_number,
+            declined_target: declinedTarget,
+            decline_reason: declineReason.trim(),
+            declined_via: "status_change_request",
+          }),
+        } as any);
+      } catch (logErr) {
+        console.warn("Could not write status change decline log:", logErr);
+      }
+
+      const { clearReferralsCache } = await import("@/lib/api/referrals");
+      clearReferralsCache();
       setIsDeclineStatusChangeOpen(false);
       setStatusChangeToAction(null);
       setDeclineReason("");
@@ -551,12 +693,12 @@ export default function ClinicalAdminDashboard() {
                         : "bg-white text-gray-700 hover:bg-muted border-2 border-gray-300"
                     }`}
                   >
-                    <span>Status Requests</span>
+                    <span>Request Status</span>
                     {requestType === "STATUS_REQUESTS" && (
                       <>
                         {statusRequestFilter !== "ALL" && (
                           <span className="bg-white/20 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">
-                            {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : "Blacklisted"}
+                            {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : statusRequestFilter === "COMPLETED" ? "Completed" : "Blacklisted"}
                           </span>
                         )}
                         <ChevronDown className={`h-3 w-3 transition-transform ${isStatusRequestFilterOpen ? "rotate-180" : ""}`} />
@@ -570,49 +712,59 @@ export default function ClinicalAdminDashboard() {
                   </button>
                   {requestType === "STATUS_REQUESTS" && isStatusRequestFilterOpen && (
                     <div className="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                      {(["ALL", "REREFERRAL", "EDIT", "DELETION", "DEFERRAL", "BLACKLISTED"] as const).map(f => (
-                        <button key={f} type="button" onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"}`}>
-                          {f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : "Blacklisted"}
-                        </button>
-                      ))}
+                      {(["ALL", "REREFERRAL", "EDIT", "DELETION", "COMPLETED", "DEFERRAL", "BLACKLISTED"] as const).map(f => {
+                        const count = statusRequestSubCounts[f];
+                        return (
+                          <button key={f} type="button" onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
+                            className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold transition-colors ${statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"}`}>
+                            <span>{f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : f === "COMPLETED" ? "Completed" : "Blacklisted"}</span>
+                            {count > 0 && (
+                              <span className={`min-w-[18px] h-[18px] flex items-center justify-center text-white text-[9px] font-bold rounded-full px-1 shadow ${statusRequestFilter === f ? "bg-red-400 border border-white" : "bg-red-500"}`}>{count > 9 ? "9+" : count}</span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                {/* My Section dropdown */}
-                {adminSection && (
-                  <div ref={sectionDropdownRef} className="relative ml-auto">
+                {/* My Section dropdown removed per product decision:
+                    clinical admins oversee every section, so filtering by
+                    their own section provided no value on either the
+                    Referrals or Requests tabs. Filter state (`showMySection`,
+                    `sectionFilterMode`) is kept for compatibility but is
+                    effectively dormant — it stays at its default (false)
+                    and the filter no-ops. */}
+
+                {/* Sort dropdown - visible on both ALL and STATUS_REQUESTS tabs */}
+                {(requestType === "ALL" || requestType === "STATUS_REQUESTS") && (
+                  <div ref={sortRef} className="relative ml-auto">
                     <button
                       type="button"
-                      onClick={() => { setShowMySection(true); setSectionDropdownOpen(prev => !prev); }}
+                      onClick={() => setIsSortOpen(prev => !prev)}
                       className={`flex items-center gap-2 px-4 h-[38px] rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all border-2 whitespace-nowrap ${
-                        showMySection
+                        isSortOpen
                           ? "bg-accent text-white border-accent shadow"
                           : "bg-white text-gray-700 border-gray-300 hover:border-accent hover:text-accent"
                       }`}
                     >
-                      <span>{showMySection && sectionFilterMode !== "ALL" ? (sectionFilterMode === "ORIGIN" ? "Origin" : "Destination") : "My Section"}</span>
-                      <ChevronDown className={`h-3 w-3 transition-transform ${sectionDropdownOpen ? "rotate-180" : ""}`} />
+                      <span>Sort By: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
                     </button>
-                    {sectionDropdownOpen && (
+                    {isSortOpen && (
                       <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                        {(["ALL", "ORIGIN", "DESTINATION"] as const).map(mode => (
+                        {(["newest", "oldest"] as const).map(opt => (
                           <button
-                            key={mode}
+                            key={opt}
                             type="button"
-                            onClick={() => {
-                              setShowMySection(true);
-                              setSectionFilterMode(mode);
-                              setSectionDropdownOpen(false);
-                            }}
+                            onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
                             className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
-                              showMySection && sectionFilterMode === mode
+                              sortOrder === opt
                                 ? "bg-accent text-white"
                                 : "text-gray-700 hover:bg-gray-100"
                             }`}
                           >
-                            {mode === "ALL" ? "All" : mode === "ORIGIN" ? "Origin" : "Destination"}
+                            {opt === "newest" ? "Newest" : "Oldest"}
                           </button>
                         ))}
                       </div>
@@ -677,12 +829,12 @@ export default function ClinicalAdminDashboard() {
                           : "bg-white text-gray-700 hover:bg-muted border-2 border-gray-300"
                       }`}
                     >
-                      <span>Status Requests</span>
+                      <span>Request Status</span>
                       {requestType === "STATUS_REQUESTS" && (
                         <>
                           {statusRequestFilter !== "ALL" && (
                             <span className="bg-white/20 text-white text-[8px] px-1 py-0.5 rounded font-bold">
-                              {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : "Blacklisted"}
+                              {statusRequestFilter === "EDIT" ? "Edit" : statusRequestFilter === "DELETION" ? "Deletion" : statusRequestFilter === "REREFERRAL" ? "Rereferral" : statusRequestFilter === "DEFERRAL" ? "Deferral" : statusRequestFilter === "COMPLETED" ? "Completed" : "Blacklisted"}
                             </span>
                           )}
                           <ChevronDown className={`h-3 w-3 transition-transform ${isStatusRequestFilterOpen ? "rotate-180" : ""}`} />
@@ -696,12 +848,18 @@ export default function ClinicalAdminDashboard() {
                     </button>
                     {requestType === "STATUS_REQUESTS" && isStatusRequestFilterOpen && (
                       <div className="absolute left-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                        {(["ALL", "REREFERRAL", "EDIT", "DELETION", "DEFERRAL", "BLACKLISTED"] as const).map(f => (
-                          <button key={f} type="button" onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
-                            className={`w-full text-left px-3 py-2 text-[10px] font-semibold transition-colors ${statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"}`}>
-                            {f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : "Blacklisted"}
-                          </button>
-                        ))}
+                        {(["ALL", "REREFERRAL", "EDIT", "DELETION", "COMPLETED", "DEFERRAL", "BLACKLISTED"] as const).map(f => {
+                          const count = statusRequestSubCounts[f];
+                          return (
+                            <button key={f} type="button" onClick={() => { setStatusRequestFilter(f); setIsStatusRequestFilterOpen(false); }}
+                              className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-[10px] font-semibold transition-colors ${statusRequestFilter === f ? "bg-secondary text-white" : "text-gray-700 hover:bg-gray-100"}`}>
+                              <span>{f === "ALL" ? "All Types" : f === "REREFERRAL" ? "Rereferral" : f === "EDIT" ? "Edit" : f === "DELETION" ? "Deletion" : f === "DEFERRAL" ? "Deferral" : f === "COMPLETED" ? "Completed" : "Blacklisted"}</span>
+                              {count > 0 && (
+                                <span className={`min-w-[16px] h-[16px] flex items-center justify-center text-white text-[9px] font-bold rounded-full px-1 shadow ${statusRequestFilter === f ? "bg-red-400 border border-white" : "bg-red-500"}`}>{count > 9 ? "9+" : count}</span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -715,35 +873,38 @@ export default function ClinicalAdminDashboard() {
                   ))}
                 </div>
 
-                {/* My Section dropdown — mobile */}
-                {adminSection && (
-                  <div ref={sectionDropdownMobileRef} className="relative w-full mt-2">
+                {/* My Section dropdown removed on mobile as well — see
+                    desktop block above for rationale. */}
+
+                {/* Sort dropdown — mobile */}
+                {(requestType === "ALL" || requestType === "STATUS_REQUESTS") && (
+                  <div className="relative w-full">
                     <button
                       type="button"
-                      onClick={() => { setShowMySection(true); setSectionDropdownOpen(prev => !prev); }}
+                      onClick={() => setIsSortOpen(prev => !prev)}
                       className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all border-2 ${
-                        showMySection
+                        isSortOpen
                           ? "bg-accent text-white border-accent shadow"
                           : "bg-white text-gray-700 border-gray-300 hover:border-accent hover:text-accent"
                       }`}
                     >
-                      <span>{showMySection && sectionFilterMode !== "ALL" ? (sectionFilterMode === "ORIGIN" ? "Origin" : "Destination") : "My Section"}</span>
-                      <ChevronDown className={`h-3 w-3 transition-transform ${sectionDropdownOpen ? "rotate-180" : ""}`} />
+                      <span>Sort By: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
                     </button>
-                    {sectionDropdownOpen && (
+                    {isSortOpen && (
                       <div className="absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                        {(["ALL", "ORIGIN", "DESTINATION"] as const).map(mode => (
+                        {(["newest", "oldest"] as const).map(opt => (
                           <button
-                            key={mode}
+                            key={opt}
                             type="button"
-                            onClick={() => { setShowMySection(true); setSectionFilterMode(mode); setSectionDropdownOpen(false); }}
+                            onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
                             className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
-                              showMySection && sectionFilterMode === mode
+                              sortOrder === opt
                                 ? "bg-accent text-white"
                                 : "text-gray-700 hover:bg-gray-100"
                             }`}
                           >
-                            {mode === "ALL" ? "All" : mode === "ORIGIN" ? "Origin" : "Destination"}
+                            {opt === "newest" ? "Newest" : "Oldest"}
                           </button>
                         ))}
                       </div>
@@ -767,8 +928,7 @@ export default function ClinicalAdminDashboard() {
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[14%]">Treatment Service</th>
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[10%]">Special Case</th>
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[13%]">Requested By</th>
-                        <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[27%]">Edit Request Reason</th>
-                        <th className="px-4 py-3 text-center font-bold uppercase tracking-wide w-[20%]">Actions</th>
+                        <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[47%]">Edit Request Reason</th>
                         <th className="px-4 py-3 text-center font-bold uppercase tracking-wide w-[6%] rounded-tr-lg"></th>
                       </tr>
                     </thead>
@@ -804,22 +964,6 @@ export default function ClinicalAdminDashboard() {
                                 {referral.edit_request_reason}
                               </div>
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  onClick={() => handleApproveEditRequest(referral.id)}
-                                  className="px-3 py-1.5 bg-success text-white text-[10px] font-bold rounded hover:bg-success/90 transition-colors uppercase tracking-wide shadow"
-                                >
-                                  APPROVE
-                                </button>
-                                <button
-                                  onClick={() => handleDeclineEditRequest(referral.id)}
-                                  className="px-3 py-1.5 bg-red-600 text-white text-[10px] font-bold rounded hover:bg-red-700 transition-colors uppercase tracking-wide shadow"
-                                >
-                                  DECLINE
-                                </button>
-                              </div>
-                            </td>
                             <td className="px-4 py-3 text-center">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -835,7 +979,7 @@ export default function ClinicalAdminDashboard() {
                           </tr>
                         ))
                       ) : (
-                        <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No pending edit requests</td></tr>
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No pending edit requests</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -850,8 +994,7 @@ export default function ClinicalAdminDashboard() {
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[14%]">Treatment Service</th>
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[10%]">Special Case</th>
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[13%]">Requested By</th>
-                        <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[27%]">Deletion Reason</th>
-                        <th className="px-4 py-3 text-center font-bold uppercase tracking-wide w-[20%]">Actions</th>
+                        <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[47%]">Deletion Reason</th>
                         <th className="px-4 py-3 text-center font-bold uppercase tracking-wide w-[6%] rounded-tr-lg"></th>
                       </tr>
                     </thead>
@@ -887,22 +1030,6 @@ export default function ClinicalAdminDashboard() {
                                 {referral.deletion_request_reason}
                               </div>
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  onClick={() => handleApproveDeletion(referral.id)}
-                                  className="px-3 py-1.5 bg-success text-white text-[10px] font-bold rounded hover:bg-success/90 transition-colors uppercase tracking-wide shadow"
-                                >
-                                  APPROVE
-                                </button>
-                                <button
-                                  onClick={() => handleDeclineDeletion(referral.id)}
-                                  className="px-3 py-1.5 bg-red-600 text-white text-[10px] font-bold rounded hover:bg-red-700 transition-colors uppercase tracking-wide shadow"
-                                >
-                                  DECLINE
-                                </button>
-                              </div>
-                            </td>
                             <td className="px-4 py-3 text-center">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -918,7 +1045,7 @@ export default function ClinicalAdminDashboard() {
                           </tr>
                         ))
                       ) : (
-                        <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No pending deletion requests</td></tr>
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No pending deletion requests</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -933,8 +1060,7 @@ export default function ClinicalAdminDashboard() {
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[14%]">Treatment Service</th>
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[10%]">Special Case</th>
                         <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[13%]">Requested By</th>
-                        <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[27%]">Rerefer Reason</th>
-                        <th className="px-4 py-3 text-center font-bold uppercase tracking-wide w-[20%]">Actions</th>
+                        <th className="px-4 py-3 text-left font-bold uppercase tracking-wide w-[47%]">Rerefer Reason</th>
                         <th className="px-4 py-3 text-center font-bold uppercase tracking-wide w-[6%] rounded-tr-lg"></th>
                       </tr>
                     </thead>
@@ -970,22 +1096,6 @@ export default function ClinicalAdminDashboard() {
                                 {referral.rerefer_request_reason}
                               </div>
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  onClick={() => handleApproveRerefer(referral.id)}
-                                  className="px-3 py-1.5 bg-success text-white text-[10px] font-bold rounded hover:bg-success/90 transition-colors uppercase tracking-wide shadow"
-                                >
-                                  APPROVE
-                                </button>
-                                <button
-                                  onClick={() => handleDeclineRerefer(referral.id)}
-                                  className="px-3 py-1.5 bg-red-600 text-white text-[10px] font-bold rounded hover:bg-red-700 transition-colors uppercase tracking-wide shadow"
-                                >
-                                  DECLINE
-                                </button>
-                              </div>
-                            </td>
                             <td className="px-4 py-3 text-center">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -1001,7 +1111,7 @@ export default function ClinicalAdminDashboard() {
                           </tr>
                         ))
                       ) : (
-                        <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No pending rereferral requests</td></tr>
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No pending rereferral requests</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1020,8 +1130,8 @@ export default function ClinicalAdminDashboard() {
                             <tr className="bg-secondary text-white">
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[12%] rounded-tl-lg">Request Type</th>
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[10%]">Chart No.</th>
-                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[20%]">Treatment</th>
-                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[10%]">Special</th>
+                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[16%]">Treatment</th>
+                              <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[14%]">Special</th>
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[14%]">Requested By</th>
                               <th className="px-3 py-3 text-left font-bold uppercase tracking-wide w-[28%]">Reason</th>
                               <th className="px-3 py-3 text-center font-bold uppercase tracking-wide w-[6%] rounded-tr-lg"></th>
@@ -1037,17 +1147,17 @@ export default function ClinicalAdminDashboard() {
                               const statusChangeParts = rawStatusChangeReason.includes("::") ? rawStatusChangeReason.split("::") : ["deferred", rawStatusChangeReason];
                               const statusChangeTargetVal = statusChangeParts[0];
                               const statusChangeReasonClean = statusChangeParts.slice(1).join("::");
-                              const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : "Blacklist") : "Unknown";
-                              const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : "bg-red-100 text-red-700";
+                              const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : statusChangeTargetVal === "completed" ? "Completion" : "Blacklist") : "Unknown";
+                              const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : statusChangeTargetVal === "completed" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
                               const reason = isRerefer ? referral.rerefer_request_reason : isEdit ? referral.edit_request_reason : isDeletion ? referral.deletion_request_reason : statusChangeReasonClean;
-                              const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : "bg-orange-50 border-orange-500";
+                              const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : statusChangeTargetVal === "completed" ? "bg-green-50 border-green-500" : "bg-orange-50 border-orange-500";
                               const requesterId = isRerefer ? referral.rerefer_requested_by : isDeletion ? referral.deletion_requested_by : referral.accepted_by_user_id;
                               return (
                                 <tr key={`${referral.id}-${reqType}`} className={`border-b border-[#87c4d8]/30 hover:bg-[#87c4d8]/10 transition-colors ${idx % 2 === 0 ? "bg-white" : "bg-[#87c4d8]/5"}`}>
                                   <td className="px-3 py-3"><span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${reqColor}`}>{reqType}</span></td>
                                   <td className="px-3 py-3 font-semibold text-secondary break-words">{referral.chart_number}</td>
                                   <td className="px-3 py-3 text-gray-700 break-words">{referral.treatment_service_destination || "—"}</td>
-                                  <td className="px-3 py-3">{referral.special_case ? <span className="inline-block bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded">{referral.special_case}</span> : <span className="text-gray-400">—</span>}</td>
+                                  <td className="px-3 py-3 overflow-hidden">{referral.special_case ? <span className="inline-block bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded whitespace-normal break-words max-w-full">{referral.special_case}</span> : <span className="text-gray-400">—</span>}</td>
                                   <td className="px-3 py-3 overflow-visible relative">
                                     {requesterId && userNames[requesterId] ? <UserProfilePopover userId={requesterId} displayName={userNames[requesterId]} /> : <span className="text-gray-400">{referral.accepted_by || "—"}</span>}
                                   </td>
@@ -1057,6 +1167,9 @@ export default function ClinicalAdminDashboard() {
                                       <DropdownMenuTrigger asChild><button className="p-1.5 rounded hover:bg-gray-200 transition-colors"><MoreHorizontal className="h-4 w-4 text-gray-500" /></button></DropdownMenuTrigger>
                                       <DropdownMenuContent align="end" className="bg-white border-2 border-gray-300 shadow-lg rounded">
                                         <DropdownMenuItem onClick={() => setSelectedReferralForDetails(referral)}>View Details</DropdownMenuItem>
+                                        {referral.edit_request_status === "approved" && (
+                                          <DropdownMenuItem onClick={() => { setReferralToEdit(referral); setIsEditModalOpen(true); }} className="text-blue-600">Edit</DropdownMenuItem>
+                                        )}
                                       </DropdownMenuContent>
                                     </DropdownMenu>
                                   </td>
@@ -1078,10 +1191,10 @@ export default function ClinicalAdminDashboard() {
                           const statusChangeParts = rawStatusChangeReason.includes("::") ? rawStatusChangeReason.split("::") : ["deferred", rawStatusChangeReason];
                           const statusChangeTargetVal = statusChangeParts[0];
                           const statusChangeReasonClean = statusChangeParts.slice(1).join("::");
-                          const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : "Blacklist") : "Unknown";
-                          const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : "bg-red-100 text-red-700";
+                          const reqType = isRerefer ? "Rereferral" : isEdit ? "Edit Request" : isDeletion ? "Deletion" : isStatusChange ? (statusChangeTargetVal === "deferred" ? "Deferral" : statusChangeTargetVal === "completed" ? "Completion" : "Blacklist") : "Unknown";
+                          const reqColor = isRerefer ? "bg-purple-100 text-purple-700" : isEdit ? "bg-amber-100 text-amber-700" : isDeletion ? "bg-red-100 text-red-700" : statusChangeTargetVal === "blacklisted" ? "bg-gray-800 text-white" : statusChangeTargetVal === "completed" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
                           const reason = isRerefer ? referral.rerefer_request_reason : isEdit ? referral.edit_request_reason : isDeletion ? referral.deletion_request_reason : statusChangeReasonClean;
-                          const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : "bg-orange-50 border-orange-500";
+                          const reasonColor = isRerefer ? "bg-purple-50 border-purple-400" : isEdit ? "bg-amber-50 border-amber-500" : isDeletion ? "bg-red-50 border-red-500" : statusChangeTargetVal === "completed" ? "bg-green-50 border-green-500" : "bg-orange-50 border-orange-500";
                           const requesterId = isRerefer ? referral.rerefer_requested_by : isDeletion ? referral.deletion_requested_by : referral.accepted_by_user_id;
                           return (
                             <div key={`${referral.id}-${reqType}-mobile`} className="bg-white rounded-lg border-2 border-[#87c4d8]/50 shadow p-4 space-y-3">
@@ -1094,6 +1207,9 @@ export default function ClinicalAdminDashboard() {
                                     <DropdownMenuTrigger asChild><button className="p-1.5 rounded hover:bg-gray-200 transition-colors"><MoreHorizontal className="h-4 w-4 text-gray-500" /></button></DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="bg-white border-2 border-gray-300 shadow-lg rounded">
                                       <DropdownMenuItem onClick={() => setSelectedReferralForDetails(referral)}>View Details</DropdownMenuItem>
+                                      {referral.edit_request_status === "approved" && (
+                                        <DropdownMenuItem onClick={() => { setReferralToEdit(referral); setIsEditModalOpen(true); }} className="text-blue-600">Edit</DropdownMenuItem>
+                                      )}
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                 </div>
@@ -1134,6 +1250,7 @@ export default function ClinicalAdminDashboard() {
                     key={referral.id}
                     id={referral.id}
                     title={`Referring ${referral.age} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
+                    specialCase={referral.special_case || undefined}
                     createdByName={referral.user_id ? userNames[referral.user_id] : undefined}
                     medicalAlert={referral.medical_alert || undefined}
                     clinicalSectionOrigin={referral.clinical_section_origin || undefined}
@@ -1148,6 +1265,7 @@ export default function ClinicalAdminDashboard() {
                     acceptedAt={referral.accepted_at || null}
                     referralStatus={referral.chart_number && blacklistedChartNumbers.has(referral.chart_number) ? "blacklisted" : (referral.referral_status || null)}
                     status={referral.status}
+                    createdAt={referral.created_at}
                     showAccept={false}
                     showUpdate={true}
                     showApprove={false}
@@ -1158,7 +1276,8 @@ export default function ClinicalAdminDashboard() {
                     editRequestReason={referral.edit_request_reason}
                     editRequestStatus={referral.edit_request_status}
                     rereferRequestStatus={referral.rerefer_request_status || null}
-                    deletionRequestStatus={(referral as any).deletion_request_status || null}
+                    deletionRequestStatus={referral.deletion_request_status || null}
+                    statusChangeReason={referral.status_change_reason || null}
                     isProfessor={true}
                     isAdvisee={true}
                     onUpdate={handleUpdateReferral}
@@ -1182,6 +1301,14 @@ export default function ClinicalAdminDashboard() {
                 onClose={() => setSelectedReferralForDetails(null)}
               />
             )}
+
+            {/* Edit Referral Modal */}
+            <EditReferralModal
+              referral={referralToEdit}
+              isOpen={isEditModalOpen}
+              onClose={() => { setIsEditModalOpen(false); setReferralToEdit(null); }}
+              onSave={handleUpdateReferral}
+            />
           </div>
         </div>
       </main>
@@ -1369,34 +1496,59 @@ export default function ClinicalAdminDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Approve Status Change Dialog */}
-      <Dialog open={isApproveStatusChangeOpen} onOpenChange={(open) => { if (!open) setIsApproveStatusChangeOpen(false); }}>
-        <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden">
-          <div className="bg-secondary px-6 py-4">
-            <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Approve Status Change</DialogTitle>
-            <p className="text-white/70 text-[10px] mt-0.5">Confirm the deferral or blacklist status change</p>
-          </div>
-          <div className="p-6">
-            <p className="text-sm text-muted-foreground mb-6">Are you sure you want to approve this status change? The referral will be moved to its new status.</p>
-            <div className="flex gap-3">
-              <button onClick={confirmApproveStatusChange} className="flex-1 px-6 py-2 bg-success text-white text-xs font-bold rounded hover:bg-success/90 transition-colors shadow uppercase tracking-wide">YES, APPROVE</button>
-              <button onClick={() => setIsApproveStatusChangeOpen(false)} className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide">CANCEL</button>
+      {/* Approve Status Change Confirmation Dialog — mirrors Approve Edit Request style */}
+      {isApproveStatusChangeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsApproveStatusChangeOpen(false)} />
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <CheckCircle className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">
+                Approve {statusChangeTarget === "blacklisted" ? "Blacklist" : statusChangeTarget === "completed" ? "Completion" : "Deferral"} Request
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                Are you sure you want to approve this {statusChangeTarget === "blacklisted" ? "blacklist" : statusChangeTarget === "completed" ? "completion" : "deferral"} request? The referral status will be changed to <strong>{statusChangeTarget === "blacklisted" ? "Blacklisted" : statusChangeTarget === "completed" ? "Completed" : "Deferred"}</strong>.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={confirmApproveStatusChange}
+                  className="flex-1 px-6 py-2 bg-success text-white text-xs font-bold rounded hover:bg-success/90 transition-colors shadow uppercase tracking-wide"
+                >
+                  YES, APPROVE
+                </button>
+                <button
+                  onClick={() => setIsApproveStatusChangeOpen(false)}
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
+                >
+                  CANCEL
+                </button>
+              </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
 
-      {/* Decline Status Change Dialog */}
+      {/* Decline Status Change Dialog — mirrors Decline Edit Request style */}
       <Dialog open={isDeclineStatusChangeOpen} onOpenChange={(open) => { if (!open) setIsDeclineStatusChangeOpen(false); }}>
         <DialogContent className="bg-white max-w-md rounded-2xl shadow-2xl p-0 overflow-hidden [&>button:last-child]:hidden">
           <div className="bg-red-600 px-6 py-4">
-            <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Decline Status Change</DialogTitle>
-            <p className="text-white/70 text-[10px] mt-0.5">The referral will be reverted to Ongoing</p>
+            <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">Decline Status Change Request</DialogTitle>
+            <p className="text-white/70 text-[10px] mt-0.5">Please provide a reason for declining this deferral / blacklist / completion request</p>
           </div>
           <div className="p-6 space-y-4">
-            <p className="text-sm text-muted-foreground">Declining will revert the referral status back to <strong>Ongoing</strong>.</p>
+            <div>
+              <label className="text-[10px] font-bold text-red-700 uppercase tracking-wide mb-1.5 block">Reason for Decline</label>
+              <textarea
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+                placeholder="Enter the reason for declining..."
+                className="w-full min-h-[100px] text-xs border-2 border-gray-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none"
+              />
+            </div>
             <div className="flex gap-3">
-              <button onClick={confirmDeclineStatusChange} className="flex-1 px-4 py-2.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors uppercase tracking-wide">YES, DECLINE</button>
+              <button onClick={confirmDeclineStatusChange} disabled={!declineReason.trim()} className="flex-1 px-4 py-2.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed">SUBMIT DECLINE</button>
               <button onClick={() => setIsDeclineStatusChangeOpen(false)} className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors uppercase tracking-wide">CANCEL</button>
             </div>
           </div>

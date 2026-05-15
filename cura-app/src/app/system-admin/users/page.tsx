@@ -1,16 +1,17 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Search, Plus, MoreHorizontal, Mail, RefreshCw, KeyRound, Pencil, Lock, Unlock, ShieldCheck } from "lucide-react";
+import { Search, Plus, MoreHorizontal, Eye, Pencil, Lock, Unlock, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { getAllProfiles, Profile } from "@/lib/api/profiles";
+import { createProfile, getAllProfiles, getCurrentUserId, updateProfile, Profile, INACTIVITY_THRESHOLD_MS } from "@/lib/api/profiles";
+import { useAuth } from "@/context/AuthContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { SystemAdminUserDialog } from "@/components/modals/SystemAdminUserDialog";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 type UserStatus = "ACTIVE" | "INACTIVE" | "LOCKED";
@@ -37,23 +38,44 @@ const STATUS_STYLE: Record<UserStatus, string> = {
 };
 
 export default function SystemAdminUsersPage() {
+  const { refreshUser } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<UserStatus | "all">("all");
-  const [addOpen, setAddOpen] = useState(false);
 
-  // Load profiles. Status is stored locally — the underlying `profiles` table
-  // does not yet have a status column, so we treat every user as ACTIVE
-  // initially and let the System Admin lock / deactivate them client-side.
+  // Single piece of state drives both Add and Edit dialogs. `mode` decides
+  // which flow runs on save; `target` carries the row being edited.
+  const [dialogState, setDialogState] = useState<{
+    open: boolean;
+    mode: "add" | "edit" | "view";
+    target: UserRow | null;
+  }>({ open: false, mode: "add", target: null });
+
+  // Load profiles. We auto-flip ACTIVE accounts to INACTIVE when their
+  // `last_active_at` (or `created_at` for legacy rows missing the column)
+  // exceeds the 1-year inactivity threshold, and persist the change so
+  // subsequent logins are rejected by the status gate in `/login`.
   const loadUsers = async () => {
     try {
       setLoading(true);
       const profiles = await getAllProfiles();
-      const rows: UserRow[] = (profiles || []).map(p => ({
-        ...p,
-        status: "ACTIVE" as UserStatus,
+      const now = Date.now();
+      const rows: UserRow[] = await Promise.all((profiles || []).map(async p => {
+        const currentStatus = (((p as any).status as UserStatus) || "ACTIVE");
+        const lastActive = (p as any).last_active_at || p.created_at;
+        const lastActiveMs = lastActive ? new Date(lastActive).getTime() : now;
+        const isStale = now - lastActiveMs > INACTIVITY_THRESHOLD_MS;
+        if (currentStatus === "ACTIVE" && isStale) {
+          // Persist so the next login is gated correctly; ignore failures —
+          // the row still renders as INACTIVE in the UI either way.
+          updateProfile(p.id, { status: "INACTIVE" } as any).catch(err =>
+            console.error("Failed to auto-mark profile inactive", p.id, err)
+          );
+          return { ...p, status: "INACTIVE" } as UserRow;
+        }
+        return { ...p, status: currentStatus } as UserRow;
       }));
       setUsers(rows);
     } catch (err) {
@@ -89,30 +111,39 @@ export default function SystemAdminUsersPage() {
     });
   }, [users, searchQuery, roleFilter, statusFilter]);
 
-  // ── Action handlers (toast-only stubs; wire to backend later) ────────────
-  const setStatus = (id: string, status: UserStatus) => {
-    setUsers(prev => prev.map(u => (u.id === id ? { ...u, status } : u)));
+  // ── Action handlers ──────────────────────────────────────────────────
+  const applyStatus = async (
+    u: UserRow,
+    status: UserStatus,
+    extras: Record<string, any> = {},
+    successMsg?: string,
+  ) => {
+    // Optimistic UI flip; revert if the persist fails.
+    const prev = u.status;
+    setUsers(list => list.map(r => r.id === u.id ? { ...r, status } : r));
+    const result = await updateProfile(u.id, { status, ...extras } as any);
+    if (!result) {
+      setUsers(list => list.map(r => r.id === u.id ? { ...r, status: prev } : r));
+      toast.error("Failed to update status");
+      return;
+    }
+    toast.success(successMsg || `${u.first_name} ${u.last_name} updated`);
   };
+
+  const handleView = (u: UserRow) =>
+    setDialogState({ open: true, mode: "view", target: u });
   const handleUpdate = (u: UserRow) =>
-    toast.info(`Update user dialog will open for ${u.first_name} ${u.last_name}`);
-  const handleUnlock = (u: UserRow) => {
-    setStatus(u.id, "ACTIVE");
-    toast.success(`${u.first_name} ${u.last_name} unlocked`);
-  };
-  const handleLock = (u: UserRow) => {
-    setStatus(u.id, "LOCKED");
-    toast.success(`${u.first_name} ${u.last_name} locked`);
-  };
-  const handleDeactivate = (u: UserRow) => {
-    setStatus(u.id, "INACTIVE");
-    toast.success(`${u.first_name} ${u.last_name} marked inactive`);
-  };
-  const handleActivate = (u: UserRow) => {
-    setStatus(u.id, "ACTIVE");
-    toast.success(`${u.first_name} ${u.last_name} reactivated`);
-  };
-  const handleResetPassword = (u: UserRow) =>
-    toast.success(`Password reset link sent to ${u.email}`);
+    setDialogState({ open: true, mode: "edit", target: u });
+  // Unlock clears the failed-attempts counter so the user starts fresh.
+  const handleUnlock = (u: UserRow) =>
+    applyStatus(u, "ACTIVE", { failed_login_attempts: 0 }, `${u.first_name} ${u.last_name} unlocked`);
+  const handleLock = (u: UserRow) =>
+    applyStatus(u, "LOCKED", {}, `${u.first_name} ${u.last_name} locked`);
+  const handleDeactivate = (u: UserRow) =>
+    applyStatus(u, "INACTIVE", {}, `${u.first_name} ${u.last_name} marked inactive`);
+  // Reactivation also resets the counter — the admin is vouching for the user.
+  const handleActivate = (u: UserRow) =>
+    applyStatus(u, "ACTIVE", { failed_login_attempts: 0 }, `${u.first_name} ${u.last_name} reactivated`);
 
   return (
     <div className="animate-enter">
@@ -129,7 +160,7 @@ export default function SystemAdminUsersPage() {
             </p>
           </div>
           <button
-            onClick={() => setAddOpen(true)}
+            onClick={() => setDialogState({ open: true, mode: "add", target: null })}
             className="inline-flex items-center gap-1.5 bg-secondary hover:bg-secondary/90 text-white text-[11px] font-bold uppercase tracking-wide px-4 py-2 rounded-lg shadow-sm transition-all"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -222,60 +253,39 @@ export default function SystemAdminUsersPage() {
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44 border-2 border-[#87c4d8]/40 shadow-lg">
-                          <DropdownMenuItem
-                            onClick={() => handleUpdate(u)}
-                            className="text-[11px] font-bold uppercase tracking-wide text-secondary cursor-pointer focus:bg-[#87c4d8]/15"
-                          >
-                            <Pencil className="h-3 w-3 mr-2" />
+                        <DropdownMenuContent align="end" className="bg-white border-2 border-gray-300 shadow-lg rounded w-40">
+                          <DropdownMenuItem onClick={() => handleView(u)} className="cursor-pointer">
+                            <Eye className="h-3.5 w-3.5 mr-2 text-secondary/70" />
+                            View Profile
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleUpdate(u)} className="cursor-pointer">
+                            <Pencil className="h-3.5 w-3.5 mr-2 text-secondary/70" />
                             Update
                           </DropdownMenuItem>
 
                           {u.status === "LOCKED" ? (
-                            <DropdownMenuItem
-                              onClick={() => handleUnlock(u)}
-                              className="text-[11px] font-bold uppercase tracking-wide text-secondary cursor-pointer focus:bg-[#87c4d8]/15"
-                            >
-                              <Unlock className="h-3 w-3 mr-2" />
+                            <DropdownMenuItem onClick={() => handleUnlock(u)} className="cursor-pointer">
+                              <Unlock className="h-3.5 w-3.5 mr-2 text-secondary/70" />
                               Unlock
                             </DropdownMenuItem>
                           ) : (
-                            <DropdownMenuItem
-                              onClick={() => handleLock(u)}
-                              className="text-[11px] font-bold uppercase tracking-wide text-secondary cursor-pointer focus:bg-[#87c4d8]/15"
-                            >
-                              <Lock className="h-3 w-3 mr-2" />
+                            <DropdownMenuItem onClick={() => handleLock(u)} className="cursor-pointer">
+                              <Lock className="h-3.5 w-3.5 mr-2 text-secondary/70" />
                               Lock
                             </DropdownMenuItem>
                           )}
 
                           {u.status === "INACTIVE" ? (
-                            <DropdownMenuItem
-                              onClick={() => handleActivate(u)}
-                              className="text-[11px] font-bold uppercase tracking-wide text-secondary cursor-pointer focus:bg-[#87c4d8]/15"
-                            >
-                              <ShieldCheck className="h-3 w-3 mr-2" />
+                            <DropdownMenuItem onClick={() => handleActivate(u)} className="cursor-pointer">
+                              <ShieldCheck className="h-3.5 w-3.5 mr-2 text-secondary/70" />
                               Activate
                             </DropdownMenuItem>
                           ) : (
-                            <DropdownMenuItem
-                              onClick={() => handleDeactivate(u)}
-                              className="text-[11px] font-bold uppercase tracking-wide text-secondary cursor-pointer focus:bg-[#87c4d8]/15"
-                            >
-                              <ShieldCheck className="h-3 w-3 mr-2" />
+                            <DropdownMenuItem onClick={() => handleDeactivate(u)} className="cursor-pointer">
+                              <ShieldCheck className="h-3.5 w-3.5 mr-2 text-secondary/70" />
                               Deactivate
                             </DropdownMenuItem>
                           )}
-
-                          <DropdownMenuSeparator />
-
-                          <DropdownMenuItem
-                            onClick={() => handleResetPassword(u)}
-                            className="text-[11px] font-bold uppercase tracking-wide text-secondary cursor-pointer focus:bg-[#87c4d8]/15"
-                          >
-                            <KeyRound className="h-3 w-3 mr-2" />
-                            Reset Password
-                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -287,161 +297,84 @@ export default function SystemAdminUsersPage() {
         </div>
       </section>
 
-      {/* ── Add User modal ────────────────────────────────────────────────── */}
-      {addOpen && (
-        <AddUserDialog
-          onClose={() => setAddOpen(false)}
-          onCreate={(draft) => {
-            const newUser: UserRow = {
-              id: `local-${Date.now()}`,
-              email: draft.email,
-              first_name: draft.first_name,
-              last_name: draft.last_name,
-              role: draft.role,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              status: "ACTIVE",
-            } as UserRow;
-            setUsers(prev => [newUser, ...prev]);
-            toast.success(`${draft.first_name} ${draft.last_name} added`);
-            setAddOpen(false);
-          }}
-        />
-      )}
+      {/* ── Add / Edit User modal (Radix Dialog — portal-rendered) ────────── */}
+      <SystemAdminUserDialog
+        open={dialogState.open}
+        onOpenChange={(open) => setDialogState(s => ({ ...s, open }))}
+        mode={dialogState.mode}
+        user={dialogState.target}
+        onSave={async (data) => {
+          if (dialogState.mode === "add") {
+            // Persist the new user so they can actually log in with the
+            // email + password the admin just assigned.
+            const created = await createProfile({
+              email: data.email,
+              first_name: data.first_name,
+              last_name: data.last_name,
+              role: data.role,
+              year_level: data.year_level,
+              clinical_department: data.clinical_department,
+              batch_name: data.batch_name,
+              subrole: data.subrole || null,
+              avatar_url: data.avatar_url,
+              // Only attach an adviser when the role can have one.
+              adviser_id: data.role === "clinician" ? (data.adviser_id ?? null) : null,
+              ...(data.password ? { password: data.password } : {}),
+            } as any);
+
+            if (!created) {
+              toast.error("Failed to create user");
+              throw new Error("createProfile returned null");
+            }
+
+            setUsers(prev => [{ ...created, status: "ACTIVE" } as UserRow, ...prev]);
+            toast.success(`${data.first_name} ${data.last_name} added`);
+          } else if (dialogState.target) {
+            // Persist the edit to Supabase so the user sees the change on
+            // their own side (login, profile card, header, etc.).
+            const id = dialogState.target.id;
+            const updates: Record<string, any> = {
+              first_name: data.first_name,
+              last_name: data.last_name,
+              email: data.email,
+              role: data.role,
+              year_level: data.year_level,
+              clinical_department: data.clinical_department,
+              batch_name: data.batch_name,
+              subrole: data.subrole || null,
+              avatar_url: data.avatar_url,
+              // Clear adviser when the user is no longer a clinician.
+              adviser_id: data.role === "clinician" ? (data.adviser_id ?? null) : null,
+            };
+            // Only set the password if the admin actually typed a new one.
+            // Empty string means "keep current".
+            if (data.password && data.password.length > 0) {
+              updates.password = data.password;
+            }
+            const updated = await updateProfile(id, updates as any);
+
+            if (!updated) {
+              toast.error("Failed to update user");
+              throw new Error("updateProfile returned null");
+            }
+
+            // Reflect the canonical record in the table.
+            setUsers(prev => prev.map(u => u.id === id
+              ? { ...u, ...updated, status: u.status }
+              : u
+            ));
+
+            // If the System Admin just edited their own profile, refresh the
+            // auth context so the sidebar avatar/name update immediately.
+            if (id === getCurrentUserId()) {
+              await refreshUser();
+            }
+
+            toast.success(`${data.first_name} ${data.last_name} updated`);
+          }
+        }}
+      />
     </div>
   );
 }
 
-// ─── Add User dialog ────────────────────────────────────────────────────────
-interface AddUserDraft {
-  first_name: string;
-  last_name: string;
-  email: string;
-  role: string;
-}
-
-function AddUserDialog({
-  onClose,
-  onCreate,
-}: {
-  onClose: () => void;
-  onCreate: (draft: AddUserDraft) => void;
-}) {
-  const [draft, setDraft] = useState<AddUserDraft>({
-    first_name: "",
-    last_name: "",
-    email: "",
-    role: "clinician",
-  });
-  const [submitting, setSubmitting] = useState(false);
-
-  const isValid =
-    draft.first_name.trim() &&
-    draft.last_name.trim() &&
-    /^\S+@\S+\.\S+$/.test(draft.email) &&
-    draft.role;
-
-  const handleSubmit = async () => {
-    if (!isValid || submitting) return;
-    setSubmitting(true);
-    // The actual user-creation backend call is intentionally stubbed here —
-    // wire it up to your auth provider / supabase invite when ready.
-    await new Promise(r => setTimeout(r, 300));
-    onCreate(draft);
-    setSubmitting(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-xl border-2 border-secondary/40 shadow-2xl w-full max-w-md overflow-hidden animate-enter">
-        <div className="px-5 py-4 border-b border-secondary/15 bg-gradient-to-r from-secondary to-secondary/80">
-          <h2 className="text-white font-bold text-sm uppercase tracking-wider flex items-center gap-2">
-            <Plus className="h-4 w-4" />
-            Add User
-          </h2>
-        </div>
-
-        <div className="px-5 py-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="First name">
-              <input
-                type="text"
-                value={draft.first_name}
-                onChange={e => setDraft({ ...draft, first_name: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border-2 border-[#87c4d8]/40 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20"
-              />
-            </Field>
-            <Field label="Last name">
-              <input
-                type="text"
-                value={draft.last_name}
-                onChange={e => setDraft({ ...draft, last_name: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border-2 border-[#87c4d8]/40 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20"
-              />
-            </Field>
-          </div>
-
-          <Field label="Email" icon={<Mail className="h-3 w-3 text-secondary/50" />}>
-            <input
-              type="email"
-              value={draft.email}
-              onChange={e => setDraft({ ...draft, email: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border-2 border-[#87c4d8]/40 focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20"
-            />
-          </Field>
-
-          <Field label="Role">
-            <select
-              value={draft.role}
-              onChange={e => setDraft({ ...draft, role: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border-2 border-[#87c4d8]/40 bg-white focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20"
-            >
-              <option value="clinician">Clinician</option>
-              <option value="professor">Professor</option>
-              <option value="clinical_admin">Clinical Admin</option>
-              <option value="system_admin">System Admin</option>
-            </select>
-          </Field>
-        </div>
-
-        <div className="px-5 py-4 border-t border-secondary/15 bg-[#87c4d8]/5 flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-secondary border-2 border-[#87c4d8]/40 rounded-lg hover:bg-[#87c4d8]/15 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!isValid || submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold uppercase tracking-wide bg-secondary text-white rounded-lg shadow-sm hover:bg-secondary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {submitting ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-            {submitting ? "Adding…" : "Add User"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-secondary/70 mb-1">
-        {icon}
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}

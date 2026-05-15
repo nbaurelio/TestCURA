@@ -64,6 +64,13 @@ export async function createEvent(data: EventFormData) {
     throw error;
   }
 
+  // Log initial status in history (for referral events, this shows "Scheduled" when accepted)
+  await (supabase.from("event_status_history" as any) as any).insert({
+    event_id: event.id,
+    status: data.status || 'scheduled',
+    changed_by: mockUserId,
+  });
+
   // Clear cache after mutation
   clearEventsCache();
 
@@ -107,6 +114,20 @@ export async function getEvents(useCache = true) {
   if (useCache) {
     eventsCache = { data: data || [], timestamp: Date.now(), userId: mockUserId };
     hasInitiallyLoaded = true;
+  }
+
+  return data;
+}
+
+// Fetch all events across all users (for admin/statistics purposes)
+export async function getAllEvents(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .order("start_time", { ascending: true });
+
+  if (error) {
+    throw error;
   }
 
   return data;
@@ -158,11 +179,20 @@ export async function updateEvent(id: string, updates: Partial<EventFormData>) {
   return data;
 }
 
+// Returns ONLY referral-sourced calendar events across all clinicians. Used
+// by the Clinical Chair and Clinical Admin schedule planners — they should
+// only see appointments tied to accepted referrals (titled
+// "Referral Appointment — Chart <number>"), not personal/manual events.
+//
+// We match on either `source = 'referral'` (preferred — set when an event
+// is created from the referral acceptance flow in `home/page.tsx`) OR a
+// title starting with "Referral Appointment" (backwards-compat for legacy
+// rows that pre-date the `source` column migration).
 export async function getAllReferralEvents(): Promise<any[]> {
   const { data, error } = await supabase
     .from("events")
     .select("*")
-    .or("source.eq.referral,title.like.Referral Appointment%")
+    .or("source.eq.referral,title.ilike.Referral Appointment%")
     .order("start_time", { ascending: true });
 
   if (error) {
@@ -172,14 +202,23 @@ export async function getAllReferralEvents(): Promise<any[]> {
   return data || [];
 }
 
+// Returns ONLY referral-sourced events owned by the given advisees. Used by
+// the Professor schedule planner (Discipline Head, Department Head, and
+// regular Professor) — they should only see appointments their advisees
+// created from accepted referrals (titled "Referral Appointment — Chart
+// <number>"), not personal/manual events on the advisees' calendars.
+//
+// Matches on either `source = 'referral'` (preferred) OR a title starting
+// with "Referral Appointment" (backwards-compat for legacy rows that
+// pre-date the `source` column migration).
 export async function getAdviseeEvents(adviseeIds: string[]): Promise<any[]> {
   if (!adviseeIds || adviseeIds.length === 0) return [];
 
   const { data, error } = await supabase
     .from("events")
     .select("*")
-    .or(`source.eq.referral,title.like.Referral Appointment%`)
     .in("user_id", adviseeIds)
+    .or("source.eq.referral,title.ilike.Referral Appointment%")
     .order("start_time", { ascending: true });
 
   if (error) {
@@ -187,6 +226,51 @@ export async function getAdviseeEvents(adviseeIds: string[]): Promise<any[]> {
   }
 
   return data || [];
+}
+
+// Marks every event linked to a referral (matched by chart number in the
+// title — events created from the acceptance flow are titled
+// "Referral Appointment — Chart <chart_number>") as `treatment_rendered`.
+// Called after a clinician's "Completed" status-change request is approved
+// so the calendar reflects that the appointment was carried out. Returns
+// the list of updated events (may be empty if no events were tied to the
+// chart number, which is fine — the referral can still be marked completed).
+export async function markReferralEventsTreatmentRendered(chartNumber: string | null | undefined): Promise<any[]> {
+  if (!chartNumber) return [];
+  const eventsTable = supabase.from("events") as any;
+  const mockUserId = getCurrentUserId();
+
+  const { data, error } = await eventsTable
+    .update({ status: "treatment_rendered" })
+    .ilike("title", `Referral Appointment — Chart ${chartNumber}%`)
+    .neq("status", "treatment_rendered")
+    .select();
+
+  if (error) {
+    console.warn("markReferralEventsTreatmentRendered: failed to update events:", error);
+    return [];
+  }
+
+  // Mirror updateEvent: log a status_history row per updated event so the
+  // ViewEventDetails timeline shows the transition.
+  const updated = (data || []) as any[];
+  if (updated.length > 0) {
+    try {
+      await Promise.all(
+        updated.map(ev =>
+          (supabase.from("event_status_history" as any) as any).insert({
+            event_id: ev.id,
+            status: "treatment_rendered",
+            changed_by: mockUserId,
+          })
+        )
+      );
+    } catch (logErr) {
+      console.warn("markReferralEventsTreatmentRendered: history log failed:", logErr);
+    }
+    clearEventsCache();
+  }
+  return updated;
 }
 
 export interface EventStatusChange {

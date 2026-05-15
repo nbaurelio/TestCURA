@@ -9,6 +9,79 @@ export function clearReferralsCache() {
   referralsCache = null;
 }
 
+// ── Name resolver for activity log descriptions ──────────────────────────
+// Looks up a user's first + last name for use in human-readable activity log
+// descriptions (e.g. "YOU HAVE ACCEPTED A REFERRAL FROM Nina Aurelio - ...").
+// Returns a sane fallback when the id is missing or the row can't be found
+// so the description never shows raw UUIDs.
+async function getDisplayName(userId: string | null | undefined): Promise<string> {
+  if (!userId) return "Someone";
+  const { data } = await (supabase.from("profiles") as any)
+    .select("first_name, last_name")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!data) return "Unknown user";
+  const name = `${data.first_name || ""} ${data.last_name || ""}`.trim();
+  return name || "Unknown user";
+}
+
+// ── Per-professor incoming-request notifier ─────────────────────────────
+// When a clinician submits an edit / rerefer / deletion / status-change
+// request, the request is routed to one or more professors via
+// `*_request_professor_ids`. The clinician's own submission log lands on
+// their activity feed, but the routed professors get nothing — the header
+// bell (`getReferralNotifications`) filters activity_logs by `user_id =
+// current user`, so unless we drop a row per professor, the request never
+// surfaces in their notification panel.
+//
+// This helper inserts one `INCOMING_<TYPE>_REQUEST` row per professor.
+// The new actions are registered in `@/lib/api/notifications.ts` so they
+// pass the filter and get human-friendly labels/colors in the bell panel.
+export async function notifyRoutedProfessors(
+  action: "INCOMING_EDIT_REQUEST" | "INCOMING_REREFER_REQUEST" | "INCOMING_DELETION_REQUEST" | "INCOMING_STATUS_CHANGE_REQUEST",
+  professorIds: string[],
+  args: {
+    referralId: string;
+    chartNumber: string | null | undefined;
+    requesterId: string;
+    reason?: string;
+    targetStatus?: string;
+  }
+) {
+  if (!professorIds || professorIds.length === 0) return;
+  const requesterName = await getDisplayName(args.requesterId);
+  const chart = args.chartNumber || "N/A";
+  const labelMap: Record<typeof action, string> = {
+    INCOMING_EDIT_REQUEST: "EDIT",
+    INCOMING_REREFER_REQUEST: "REREFER",
+    INCOMING_DELETION_REQUEST: "DELETION",
+    INCOMING_STATUS_CHANGE_REQUEST: "STATUS CHANGE",
+  } as const;
+  const requestLabel = labelMap[action];
+  const targetSuffix = action === "INCOMING_STATUS_CHANGE_REQUEST" && args.targetStatus
+    ? ` TO ${args.targetStatus.toUpperCase()}`
+    : "";
+  const reasonSuffix = args.reason ? `, Reason: ${args.reason}` : "";
+
+  const activityLogsTable = supabase.from("activity_logs") as any;
+  await Promise.all(
+    professorIds.map(profId =>
+      activityLogsTable.insert({
+        user_id: profId,
+        action,
+        description: `${requesterName} SENT YOU A ${requestLabel} REQUEST${targetSuffix} - Chart: ${chart}${reasonSuffix}`,
+        metadata: JSON.stringify({
+          referral_id: args.referralId,
+          chart_number: args.chartNumber,
+          requested_by_user_id: args.requesterId,
+          reason: args.reason,
+          target_status: args.targetStatus,
+        }),
+      } as any)
+    )
+  );
+}
+
 export interface ReferralFormData {
   chart_number: string;
   treatment?: string;
@@ -155,6 +228,7 @@ export interface Referral {
   edit_request_decline_reason: string | null;
   edit_request_status: string | null;
   edit_request_professor_ids?: string[] | null;
+  edit_requested_at: string | null;
   last_edited_by: string | null;
   last_edited_at: string | null;
   referral_status: string | null;
@@ -174,7 +248,46 @@ export interface Referral {
   deletion_request_professor_ids?: string[] | null;
   deletion_requested_by: string | null;
   deletion_requested_at: string | null;
+  status_change_reason?: string | null;
+  status_change_professor_ids?: string[] | null;
+  status_change_requested_at?: string | null;
+  status_change_decline_reason?: string | null;
+  status_change_approved_by?: string | null;
   created_at: string;
+}
+
+// Lookup a single referral by its primary key. Used by the Activity Log
+// details modal to deep-link from a clicked chart number into the standard
+// "View Details" experience.
+export async function getReferralById(id: string): Promise<Referral | null> {
+  const { data, error } = await supabase
+    .from("referrals")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error fetching referral by id:", error);
+    return null;
+  }
+  return (data as unknown as Referral) || null;
+}
+
+// Lookup a single referral by its chart number. Falls back to the most-recent
+// match if duplicates exist (shouldn't, but be defensive).
+export async function getReferralByChartNumber(chartNumber: string): Promise<Referral | null> {
+  const { data, error } = await supabase
+    .from("referrals")
+    .select("*")
+    .eq("chart_number", chartNumber)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error("Error fetching referral by chart number:", error);
+    return null;
+  }
+  return ((data as Referral[]) || [])[0] || null;
 }
 
 export async function getReferrals(useCache = true): Promise<Referral[]> {
@@ -232,6 +345,21 @@ export async function updateReferral(id: string, updates: Partial<ReferralFormDa
   // Track who edited and when
   safeUpdates.last_edited_by = mockUserId;
   safeUpdates.last_edited_at = new Date().toISOString();
+
+  // If this is a real content edit (not just a request field update), mark the
+  // edit request as "completed" so it disappears from the request-status page.
+  // Only do this when the caller isn't explicitly setting edit_request_status.
+  const isContentEdit = [
+    "chart_number", "age", "sex", "medical_alert",
+    "clinical_section_origin", "clinical_section_destination",
+    "clinical_discipline_origin", "clinical_discipline_destination",
+    "treatment_service_origin", "treatment_service_destination",
+    "special_case", "tentative_appointment_schedule",
+    "notes_and_special_indications",
+  ].some(k => k in safeUpdates);
+  if (isContentEdit && !("edit_request_status" in safeUpdates)) {
+    safeUpdates.edit_request_status = "completed";
+  }
 
   const { data, error } = await referralsTable
     .update(safeUpdates)
@@ -433,16 +561,19 @@ export async function acceptReferral(id: string, acceptedBy: string) {
   // Clear cache after mutation
   clearReferralsCache();
 
-  // Log the activity
+  // Log the activity — name the original referring clinician so the row is
+  // self-explanatory in the activity log.
+  const referringName = await getDisplayName(data.user_id);
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "ACCEPT_REFERRAL",
-    description: `YOU HAVE ACCEPTED A REFERRAL - Chart: ${data.chart_number}, Destination: ${data.clinical_section_destination}`,
+    description: `YOU HAVE ACCEPTED A REFERRAL FROM ${referringName} - Chart: ${data.chart_number}, Destination: ${data.clinical_section_destination}`,
     metadata: JSON.stringify({
       referral_id: id,
       chart_number: data.chart_number,
       destination: data.clinical_section_destination,
-      accepted_by: acceptedBy
+      accepted_by: acceptedBy,
+      referred_by_user_id: data.user_id,
     })
   } as any);
 
@@ -481,18 +612,23 @@ export async function approveReferral(id: string) {
     throw error;
   }
 
-  // Log the activity
+  // Log the activity — name the clinician whose referral was approved.
+  const clinicianName = await getDisplayName(data.user_id);
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "APPROVE_REFERRAL",
-    description: `YOU HAVE APPROVED A REFERRAL - Chart: ${data.chart_number}, Destination: ${data.clinical_section_destination}`,
+    description: `YOU HAVE APPROVED ${clinicianName}'S REFERRAL - Chart: ${data.chart_number}, Destination: ${data.clinical_section_destination}`,
     metadata: JSON.stringify({
       referral_id: id,
       chart_number: data.chart_number,
       destination: data.clinical_section_destination,
-      approved_by: "Professor"
+      approved_by: mockUserId,
+      referred_by_user_id: data.user_id,
     })
   } as any);
+
+  // Clear cache after mutation
+  clearReferralsCache();
 
   return data;
 }
@@ -551,6 +687,7 @@ export async function submitEditRequest(id: string, reason: string, professorIds
       edit_request_reason: reason,
       edit_request_status: "pending",
       edit_request_professor_ids: professorIds.length > 0 ? professorIds : null,
+      edit_requested_at: new Date().toISOString(),
     } as any)
     .eq("id", id)
     .select()
@@ -564,6 +701,15 @@ export async function submitEditRequest(id: string, reason: string, professorIds
     description: `EDIT REQUEST SUBMITTED - Chart: ${data.chart_number}, Reason: ${reason}`,
     metadata: JSON.stringify({ referral_id: id, reason })
   } as any);
+
+  // Drop a notification row in each routed professor's feed so the request
+  // surfaces in their bell panel (see `notifyRoutedProfessors`).
+  await notifyRoutedProfessors("INCOMING_EDIT_REQUEST", professorIds, {
+    referralId: id,
+    chartNumber: data.chart_number,
+    requesterId: mockUserId,
+    reason,
+  });
 
   // Clear cache after mutation
   clearReferralsCache();
@@ -586,12 +732,27 @@ export async function approveEditRequest(id: string) {
 
   if (error) throw error;
 
+  // Resolve names for both sides of the interaction.
+  const requesterName = await getDisplayName(data.user_id);
+  const approverName = await getDisplayName(mockUserId);
+
+  // Approver's own log.
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "APPROVE_EDIT_REQUEST",
-    description: `EDIT REQUEST APPROVED - Chart: ${data.chart_number}`,
+    description: `YOU HAVE APPROVED ${requesterName}'S EDIT REQUEST - Chart: ${data.chart_number}`,
     metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, requested_by_user_id: data.user_id })
   } as any);
+
+  // Notify the requester so they see the outcome on their activity log.
+  if (data.user_id && data.user_id !== mockUserId) {
+    await activityLogsTable.insert({
+      user_id: data.user_id,
+      action: "APPROVE_EDIT_REQUEST",
+      description: `YOUR EDIT REQUEST WAS APPROVED BY ${approverName} - Chart: ${data.chart_number}`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, approved_by_user_id: mockUserId })
+    } as any);
+  }
 
   // Clear cache after mutation
   clearReferralsCache();
@@ -617,12 +778,24 @@ export async function declineEditRequest(id: string, reason?: string) {
 
   if (error) throw error;
 
+  const requesterName = await getDisplayName(data.user_id);
+  const declinerName = await getDisplayName(mockUserId);
+
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DECLINE_EDIT_REQUEST",
-    description: `EDIT REQUEST DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+    description: `YOU HAVE DECLINED ${requesterName}'S EDIT REQUEST - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
     metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: data.user_id })
   } as any);
+
+  if (data.user_id && data.user_id !== mockUserId) {
+    await activityLogsTable.insert({
+      user_id: data.user_id,
+      action: "DECLINE_EDIT_REQUEST",
+      description: `YOUR EDIT REQUEST WAS DECLINED BY ${declinerName} - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, declined_by_user_id: mockUserId })
+    } as any);
+  }
 
   // Clear cache after mutation
   clearReferralsCache();
@@ -664,6 +837,14 @@ export async function submitRereferRequest(id: string, reason: string, professor
     })
   } as any);
 
+  // Notify each routed professor (bell panel feed).
+  await notifyRoutedProfessors("INCOMING_REREFER_REQUEST", professorIds, {
+    referralId: id,
+    chartNumber: data.chart_number,
+    requesterId: mockUserId,
+    reason,
+  });
+
   // Clear cache after mutation
   clearReferralsCache();
 
@@ -696,17 +877,31 @@ export async function approveRereferRequest(id: string) {
   if (error) throw error;
 
   // Log the activity
+  const requesterId = currentData?.rerefer_requested_by;
+  const requesterName = await getDisplayName(requesterId);
+  const approverName = await getDisplayName(mockUserId);
+
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "APPROVE_REREFER_REQUEST",
-    description: `REREFER REQUEST APPROVED - Chart: ${data.chart_number}`,
+    description: `YOU HAVE APPROVED ${requesterName}'S REREFER REQUEST - Chart: ${data.chart_number}`,
     metadata: JSON.stringify({
       referral_id: id,
       chart_number: data.chart_number,
       previous_accepted_by: currentData?.accepted_by,
-      requested_by_user_id: currentData?.rerefer_requested_by,
+      requested_by_user_id: requesterId,
     })
   } as any);
+
+  // Notify the requester.
+  if (requesterId && requesterId !== mockUserId) {
+    await activityLogsTable.insert({
+      user_id: requesterId,
+      action: "APPROVE_REREFER_REQUEST",
+      description: `YOUR REREFER REQUEST WAS APPROVED BY ${approverName} - Chart: ${data.chart_number}`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, approved_by_user_id: mockUserId })
+    } as any);
+  }
 
   // Clear cache after mutation
   clearReferralsCache();
@@ -733,12 +928,25 @@ export async function declineRereferRequest(id: string, reason?: string) {
 
   if (error) throw error;
 
+  const requesterId = data.rerefer_requested_by;
+  const requesterName = await getDisplayName(requesterId);
+  const declinerName = await getDisplayName(mockUserId);
+
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DECLINE_REREFER_REQUEST",
-    description: `REREFER REQUEST DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
-    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: data.rerefer_requested_by })
+    description: `YOU HAVE DECLINED ${requesterName}'S REREFER REQUEST - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+    metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: requesterId })
   } as any);
+
+  if (requesterId && requesterId !== mockUserId) {
+    await activityLogsTable.insert({
+      user_id: requesterId,
+      action: "DECLINE_REREFER_REQUEST",
+      description: `YOUR REREFER REQUEST WAS DECLINED BY ${declinerName} - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, declined_by_user_id: mockUserId })
+    } as any);
+  }
 
   return data;
 }
@@ -802,6 +1010,14 @@ export async function submitDeletionRequest(id: string, reason: string, professo
     })
   } as any);
 
+  // Notify each routed professor (bell panel feed).
+  await notifyRoutedProfessors("INCOMING_DELETION_REQUEST", professorIds, {
+    referralId: id,
+    chartNumber: data.chart_number,
+    requesterId: mockUserId,
+    reason,
+  });
+
   clearReferralsCache();
   return data;
 }
@@ -819,21 +1035,25 @@ export async function approveDeletionRequest(id: string) {
 
   if (fetchError) throw fetchError;
 
-  // Log approval for the professor
+  // Resolve names for both sides.
+  const requesterName = await getDisplayName(referral.deletion_requested_by);
+  const approverName = await getDisplayName(mockUserId);
+
+  // Log approval for the professor.
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "APPROVE_DELETION_REQUEST",
-    description: `DELETION REQUEST APPROVED - Chart: ${referral.chart_number}`,
+    description: `YOU HAVE APPROVED ${requesterName}'S DELETION REQUEST - Chart: ${referral.chart_number}`,
     metadata: JSON.stringify({ referral_id: id, chart_number: referral.chart_number, requested_by_user_id: referral.deletion_requested_by })
   } as any);
 
-  // Log notification for the requester
+  // Log notification for the requester.
   if (referral.deletion_requested_by && referral.deletion_requested_by !== mockUserId) {
     await activityLogsTable.insert({
       user_id: referral.deletion_requested_by,
       action: "APPROVE_DELETION_REQUEST",
-      description: `YOUR DELETION REQUEST WAS APPROVED - Chart: ${referral.chart_number} has been removed from the system.`,
-      metadata: JSON.stringify({ referral_id: id, chart_number: referral.chart_number })
+      description: `YOUR DELETION REQUEST WAS APPROVED BY ${approverName} - Chart: ${referral.chart_number} has been removed from the system.`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: referral.chart_number, approved_by_user_id: mockUserId })
     } as any);
   }
 
@@ -866,20 +1086,23 @@ export async function declineDeletionRequest(id: string, reason?: string) {
 
   if (error) throw error;
 
-  // Notify the requester
+  const requesterName = await getDisplayName(requestedBy);
+  const declinerName = await getDisplayName(mockUserId);
+
+  // Notify the requester.
   if (requestedBy && requestedBy !== mockUserId) {
     await activityLogsTable.insert({
       user_id: requestedBy,
       action: "DECLINE_DELETION_REQUEST",
-      description: `YOUR DELETION REQUEST WAS DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
-      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason })
+      description: `YOUR DELETION REQUEST WAS DECLINED BY ${declinerName} - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+      metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, declined_by_user_id: mockUserId })
     } as any);
   }
 
   await activityLogsTable.insert({
     user_id: mockUserId,
     action: "DECLINE_DELETION_REQUEST",
-    description: `DELETION REQUEST DECLINED - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
+    description: `YOU HAVE DECLINED ${requesterName}'S DELETION REQUEST - Chart: ${data.chart_number}${reason ? `, Reason: ${reason}` : ""}`,
     metadata: JSON.stringify({ referral_id: id, chart_number: data.chart_number, reason, requested_by_user_id: requestedBy })
   } as any);
 

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProfileCard } from "@/components/sidebar/ProfileCard";
@@ -20,6 +21,17 @@ export default function AcceptedReferralsPage() {
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [acceptedReferralIds, setAcceptedReferralIds] = useState<Set<string>>(new Set());
   const [logsLoaded, setLogsLoaded] = useState(false);
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setIsSortOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const fetchUserName = async () => {
@@ -115,9 +127,21 @@ export default function AcceptedReferralsPage() {
         (acceptedReferralIds.has(referral.id) || referral.accepted_by_user_id === currentUserId) &&
         (referral.status === "pending" || referral.status === "approved") &&
         !["completed", "deferred", "blacklisted"].includes(referral.referral_status?.toLowerCase() ?? "") &&
-        !(referral as any).status_change_reason
-    ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [referrals, acceptedReferralIds, logsLoaded, currentUserId, blacklistedChartNumbers]);
+        // Hide referrals with approved rereferral requests — they should only appear on request status page
+        // until the clinician sends them back to the system
+        referral.rerefer_request_status !== "approved"
+        // NOTE: previously this also excluded referrals with a pending
+        // status_change_reason. That hid Ongoing referrals the moment the
+        // acceptor submitted a Deferral / Blacklist request — leaving the
+        // acceptor with no way to see (or cancel) their own pending request.
+        // We keep them visible; the ReferralCard renders a "PENDING DEFERRAL"
+        // / "PENDING BLACKLIST" badge beside the Ongoing badge.
+    ).sort((a, b) => {
+      const aTs = new Date(a.accepted_at ?? a.created_at).getTime();
+      const bTs = new Date(b.accepted_at ?? b.created_at).getTime();
+      return sortOrder === "newest" ? bTs - aTs : aTs - bTs;
+    });
+  }, [referrals, acceptedReferralIds, logsLoaded, currentUserId, blacklistedChartNumbers, sortOrder]);
 
   const searchedReferrals = useMemo(() => {
     if (!searchQuery.trim()) return acceptedReferrals;
@@ -170,8 +194,34 @@ export default function AcceptedReferralsPage() {
             </Link>
 
             {/* Page Header */}
-            <div className="bg-secondary text-white text-sm font-bold py-3 px-5 rounded shadow mb-5 uppercase tracking-wide">
-              ACCEPTED REFERRALS
+            <div className="bg-secondary text-white text-sm font-bold py-2.5 px-5 rounded shadow mb-5 uppercase tracking-wide flex items-center justify-between gap-3">
+              <span>ACCEPTED REFERRALS</span>
+              <div ref={sortRef} className="relative normal-case tracking-normal">
+                <button
+                  type="button"
+                  onClick={() => setIsSortOpen(p => !p)}
+                  className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 transition-colors text-white text-[11px] font-bold uppercase tracking-wide px-3 py-1.5 rounded border border-white/30"
+                >
+                  <span>Sort by: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isSortOpen && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border-2 border-secondary/20 rounded shadow-lg z-50 overflow-hidden min-w-[140px]">
+                    {(["newest", "oldest"] as const).map(opt => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
+                          sortOrder === opt ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"
+                        }`}
+                      >
+                        {opt === "newest" ? "Newest" : "Oldest"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Accepted Referrals List */}
@@ -190,6 +240,7 @@ export default function AcceptedReferralsPage() {
                     key={referral.id}
                     id={referral.id}
                     title={`Referring ${referral.age} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
+                    specialCase={referral.special_case || undefined}
                     medicalAlert={referral.medical_alert || undefined}
                     clinicalSectionOrigin={referral.clinical_section_origin || undefined}
                     clinicalSectionDestination={referral.clinical_section_destination}
@@ -202,6 +253,7 @@ export default function AcceptedReferralsPage() {
                     acceptedBy={referral.accepted_by || undefined}
                     acceptedAt={referral.accepted_at}
                     status={referral.status}
+                    createdAt={referral.created_at}
                     showAccept={false}
                     showUpdate={false}
                     age={referral.age ?? undefined}
@@ -218,7 +270,8 @@ export default function AcceptedReferralsPage() {
                     onRerefer={() => loadReferrals()}
                     onSendBackToSystem={handleSendBackToSystem}
                     onDelete={() => handleDeleteReferral(referral.id)}
-                    statusChangeReason={(referral as any).status_change_reason}
+                    onEditRequestSubmitted={() => loadReferrals()}
+                    statusChangeReason={referral.status_change_reason}
                   />
                 ))
               )}

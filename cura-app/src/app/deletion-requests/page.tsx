@@ -147,6 +147,7 @@ export default function DeletionRequestsPage() {
                     key={referral.id}
                     id={referral.id}
                     title={`Referring ${referral.age} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
+                    specialCase={referral.special_case || undefined}
                     medicalAlert={referral.medical_alert || undefined}
                     clinicalSectionOrigin={referral.clinical_section_origin || undefined}
                     clinicalSectionDestination={referral.clinical_section_destination}
@@ -159,6 +160,7 @@ export default function DeletionRequestsPage() {
                     acceptedBy={referral.accepted_by || undefined}
                     acceptedAt={referral.accepted_at}
                     status={referral.status}
+                    createdAt={referral.created_at}
                     showAccept={false}
                     showUpdate={true}
                     age={referral.age ?? undefined}

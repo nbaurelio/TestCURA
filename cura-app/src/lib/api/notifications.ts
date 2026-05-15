@@ -38,6 +38,17 @@ export async function getReferralNotifications(): Promise<ReferralNotification[]
     "DELETION_REQUEST",
     "APPROVE_DELETION_REQUEST",
     "DECLINE_DELETION_REQUEST",
+    // Status-change approve/decline rows are written by `professor/page.tsx`
+    // with `user_id = professorId`, so including the action surfaces them in
+    // the professor's bell panel.
+    "CHANGE_REFERRAL_STATUS",
+    // Incoming-request rows written by `notifyRoutedProfessors` so each
+    // routed professor sees a notification when a clinician submits an
+    // edit / rerefer / deletion / status-change request.
+    "INCOMING_EDIT_REQUEST",
+    "INCOMING_REREFER_REQUEST",
+    "INCOMING_DELETION_REQUEST",
+    "INCOMING_STATUS_CHANGE_REQUEST",
   ];
 
   const { data, error } = await activityLogsTable
@@ -108,12 +119,20 @@ export function formatActionLabel(action: string): string {
     DELETION_REQUEST: "Deletion Requested",
     APPROVE_DELETION_REQUEST: "Deletion Request Approved",
     DECLINE_DELETION_REQUEST: "Deletion Request Declined",
+    CHANGE_REFERRAL_STATUS: "Status Change",
+    INCOMING_EDIT_REQUEST: "New Edit Request",
+    INCOMING_REREFER_REQUEST: "New Rerefer Request",
+    INCOMING_DELETION_REQUEST: "New Deletion Request",
+    INCOMING_STATUS_CHANGE_REQUEST: "New Status Change Request",
   };
   return labels[action] || action;
 }
 
 // Get color for action badge
 export function getActionColor(action: string): string {
+  // Incoming requests (newly received) — neutral blue so they read as
+  // "something needs your attention" without conflicting with approve/decline.
+  if (action.startsWith("INCOMING_")) return "bg-blue-100 text-blue-700";
   if (action.includes("APPROVE") || action === "ACCEPT_REFERRAL") return "bg-green-100 text-green-700";
   if (action.includes("DECLINE") || action === "DELETE_REFERRAL") return "bg-red-100 text-red-700";
   if (action.includes("REREFER")) return "bg-amber-100 text-amber-700";

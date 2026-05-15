@@ -5,7 +5,7 @@ import { Search, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { getAllActivityLogs, ActivityLog } from "@/lib/api/activity-logs";
 import { getAllProfiles, Profile } from "@/lib/api/profiles";
-import { ActivityLogDetailsModal } from "@/components/modals/ActivityLogDetailsModal";
+import { ActivityLogDetailsModal, depersonalizeDescription } from "@/components/modals/ActivityLogDetailsModal";
 
 const LOGS_PER_PAGE = 25;
 
@@ -34,7 +34,6 @@ export default function SystemAdminActivityLogsPage() {
   const [profilesById, setProfilesById] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [actionFilter, setActionFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
 
@@ -63,20 +62,12 @@ export default function SystemAdminActivityLogsPage() {
   }, []);
 
   // Reset paging when filters change so the user always lands on page 1.
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, actionFilter]);
-
-  // Distinct action types for the dropdown filter.
-  const actionTypes = useMemo(() => {
-    const set = new Set<string>();
-    logs.forEach(l => set.add(l.action));
-    return Array.from(set).sort();
-  }, [logs]);
+  useEffect(() => { setCurrentPage(1); }, [searchQuery]);
 
   // Search-and-filter pipeline.
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return logs.filter(l => {
-      if (actionFilter !== "all" && l.action !== actionFilter) return false;
       if (!q) return true;
       const userName = profilesById[l.user_id]
         ? `${profilesById[l.user_id].first_name} ${profilesById[l.user_id].last_name}`
@@ -87,7 +78,7 @@ export default function SystemAdminActivityLogsPage() {
         userName.toLowerCase().includes(q)
       );
     });
-  }, [logs, searchQuery, actionFilter, profilesById]);
+  }, [logs, searchQuery, profilesById]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / LOGS_PER_PAGE));
   const pageStart = (currentPage - 1) * LOGS_PER_PAGE;
@@ -132,16 +123,6 @@ export default function SystemAdminActivityLogsPage() {
             />
           </div>
 
-          <select
-            value={actionFilter}
-            onChange={e => setActionFilter(e.target.value)}
-            className="text-[11px] font-semibold rounded-lg border-2 border-[#87c4d8]/40 bg-white px-2.5 py-2 text-secondary focus:outline-none focus:border-[#5B8AB8]/60 focus:ring-1 focus:ring-[#5B8AB8]/20 transition-all max-w-[200px]"
-          >
-            <option value="all">All Actions</option>
-            {actionTypes.map(a => (
-              <option key={a} value={a}>{formatAction(a)}</option>
-            ))}
-          </select>
         </div>
 
         {/* Table */}
@@ -160,7 +141,7 @@ export default function SystemAdminActivityLogsPage() {
                 <tr><td colSpan={4} className="text-center py-12 text-gray-500">Loading activity logs…</td></tr>
               ) : visibleLogs.length === 0 ? (
                 <tr><td colSpan={4} className="text-center py-12 text-gray-500">
-                  {searchQuery || actionFilter !== "all"
+                  {searchQuery
                     ? "No logs match the current filters."
                     : "No activity logs yet."}
                 </td></tr>
@@ -182,8 +163,8 @@ export default function SystemAdminActivityLogsPage() {
                         {formatAction(log.action)}
                       </span>
                     </td>
-                    <td className="py-3 px-5 text-gray-700 font-medium truncate max-w-md" title={log.description}>
-                      {log.description}
+                    <td className="py-3 px-5 text-gray-700 font-medium truncate max-w-md" title={depersonalizeDescription(log.description, userLabel(log.user_id))}>
+                      {depersonalizeDescription(log.description, userLabel(log.user_id))}
                     </td>
                   </tr>
                 ))
@@ -242,6 +223,7 @@ export default function SystemAdminActivityLogsPage() {
         log={selectedLog}
         isOpen={!!selectedLog}
         onClose={() => setSelectedLog(null)}
+        actorName={selectedLog ? userLabel(selectedLog.user_id) : undefined}
       />
     </div>
   );

@@ -139,6 +139,8 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
         </Link>
 
         <div className="flex items-center gap-3 sm:gap-5">
+          {/* Referral search — hidden for system admins (no referral context) */}
+          {role !== "system_admin" && (
           <div className="hidden sm:flex items-center rounded-lg w-[200px] sm:w-[240px] md:w-[340px] border border-[#6aafc8] bg-white shadow-sm overflow-visible focus-within:border-secondary focus-within:ring-1 focus-within:ring-secondary/20 transition-all">
             <Search className="h-3.5 w-3.5 text-secondary/50 ml-3 flex-shrink-0" />
             <input
@@ -179,6 +181,8 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
             </div>
           </div>
 
+          )}
+          {role !== "system_admin" && (
           <button
             className="sm:hidden p-2 rounded hover:bg-[#6aafc8] transition-colors"
             onClick={() => {
@@ -188,7 +192,9 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
           >
             <Search className="h-5 w-5 text-secondary" />
           </button>
-          {/* Referral Notifications */}
+          )}
+          {/* Referral Notifications — hidden for system admins */}
+          {role !== "system_admin" && (
           <div ref={referralPanelRef} className="relative">
             <button
               onClick={() => { setIsReferralPanelOpen(p => !p); setIsCalendarPanelOpen(false); }}
@@ -240,16 +246,19 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
             )}
           </div>
 
-          {/* Calendar Notifications */}
+          )}
+
+          {/* Calendar Notifications â€” hidden for system admins */}
+          {role !== "system_admin" && (
           <div ref={calendarPanelRef} className="relative">
             <button
               onClick={() => { setIsCalendarPanelOpen(p => !p); setIsReferralPanelOpen(false); }}
               className="p-2 rounded hover:bg-[#6aafc8] transition-colors relative"
             >
-              <Bell className="h-5 w-5 text-secondary" />
-              {calendarNotifs.filter(n => n.isUpcoming).length > 0 && (
+              <Clock className="h-5 w-5 text-secondary" />
+              {calendarNotifs.length > 0 && (
                 <span className="absolute top-1 right-1 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-1">
-                  {calendarNotifs.filter(n => n.isUpcoming).length > 9 ? "9+" : calendarNotifs.filter(n => n.isUpcoming).length}
+                  {calendarNotifs.length > 9 ? "9+" : calendarNotifs.length}
                 </span>
               )}
             </button>
@@ -303,7 +312,9 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
               </div>
             )}
           </div>
+          )}
 
+          {role !== "system_admin" && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="cursor-pointer flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-[#6aafc8] transition-colors">
@@ -347,11 +358,12 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
         </div>
       </header>
 
       {/* Mobile Search Bar */}
-      {isMobileSearchOpen && (
+      {isMobileSearchOpen && role !== "system_admin" && (
         <div className="sm:hidden sticky top-[42px] z-40 bg-[#87c4d8] border-b border-[#6aafc8] px-4 py-2.5 shadow-md">
           <div className="flex items-center bg-white rounded-lg border border-[#6aafc8] shadow-sm overflow-visible">
             <Search className="h-3.5 w-3.5 text-secondary/50 ml-3 flex-shrink-0" />

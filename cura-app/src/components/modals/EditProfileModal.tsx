@@ -1,11 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Cropper from "react-easy-crop";
-import { Plus, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Plus, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { getMockUserProfile, updateProfile, Profile } from "@/lib/api/profiles";
+import { useAuth } from "@/context/AuthContext";
 import {
   Dialog,
   DialogContent,
@@ -21,8 +24,16 @@ interface EditProfileModalProps {
 }
 
 export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModalProps) {
+  const router = useRouter();
+  const { logout } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  // Two-step confirm flow for account deactivation.
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
   const [formData, setFormData] = useState({
     first_name: "",
     last_name: "",
@@ -71,8 +82,28 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
   useEffect(() => {
     if (open) {
       loadProfile();
+      // Always start with blank password fields — the dialog never shows
+      // the existing password, and a stale value would be misleading.
+      setPassword("");
+      setConfirmPassword("");
+      setPasswordError(null);
+      setConfirmDeactivate(false);
     }
   }, [open]);
+
+  // Re-validate the password match in real time so the user sees feedback
+  // as they type and the Save button enables/disables accordingly.
+  useEffect(() => {
+    if (!password && !confirmPassword) {
+      setPasswordError(null);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError("Passwords do not match");
+    } else {
+      setPasswordError(null);
+    }
+  }, [password, confirmPassword]);
 
   const loadProfile = async () => {
     try {
@@ -102,20 +133,17 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
       return;
     }
 
-    console.log("Saving profile with data:", {
-      id: profile.id,
-      updates: {
-        first_name: formData.first_name,
-        last_name: formData.last_name,
-        year_level: formData.year_level,
-        clinical_department: formData.clinical_department,
-        email: formData.email,
-      }
-    });
+    // Block saving when the user has typed something into either password
+    // field but the two values disagree. An empty pair is allowed and means
+    // "keep the existing password".
+    if (password !== confirmPassword) {
+      setPasswordError("Passwords do not match");
+      return;
+    }
 
     try {
       setLoading(true);
-      const result = await updateProfile(profile.id, {
+      const updates: Record<string, any> = {
         first_name: formData.first_name,
         last_name: formData.last_name,
         year_level: formData.year_level,
@@ -124,7 +152,11 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
         subrole: formData.subrole || null,
         email: formData.email,
         avatar_url: formData.avatar_url,
-      } as any);
+      };
+      if (password.length > 0) {
+        updates.password = password;
+      }
+      const result = await updateProfile(profile.id, updates as any);
       
       console.log("Update result:", result);
       
@@ -143,6 +175,29 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
       alert("Failed to update profile. Please try again.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeactivate = async () => {
+    if (!profile) return;
+    try {
+      setDeactivating(true);
+      const result = await updateProfile(profile.id, { status: "INACTIVE" } as any);
+      if (!result) {
+        alert("Failed to deactivate account. Please try again.");
+        setDeactivating(false);
+        return;
+      }
+      // Clear the in-memory session and push the user back to the login
+      // screen. Their next login attempt will be rejected by the INACTIVE
+      // check in `/login`.
+      logout();
+      onOpenChange(false);
+      router.replace("/login");
+    } catch (err) {
+      console.error("Error deactivating account:", err);
+      alert("Failed to deactivate account. Please try again.");
+      setDeactivating(false);
     }
   };
 
@@ -314,7 +369,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
                   <option value="Professor">Professor</option>
                 </select>
               </div>
-            ) : (
+            ) : profile?.role === "system_admin" ? null : (
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Year Level</label>
@@ -345,7 +400,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
                 </div>
               </div>
             )}
-            {profile?.role !== "clinical_admin" && profile?.role !== "professor" && (
+            {profile?.role !== "clinical_admin" && profile?.role !== "professor" && profile?.role !== "system_admin" && (
               <div>
                 <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Batch Name</label>
                 <Input
@@ -373,11 +428,26 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
             </div>
             <div>
               <label className="text-[10px] font-semibold text-blue-500 mb-1 block">New Password</label>
-              <Input className="h-8 text-xs border-blue-300 focus:ring-blue-500" type="password" placeholder="Leave blank to keep current" />
+              <PasswordInput
+                className={`h-8 text-xs ${passwordError ? "border-red-400 focus:ring-red-500" : "border-blue-300 focus:ring-blue-500"}`}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Leave blank to keep current"
+              />
             </div>
             <div>
               <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Confirm Password</label>
-              <Input className="h-8 text-xs border-blue-300 focus:ring-blue-500" type="password" placeholder="Leave blank to keep current" />
+              <PasswordInput
+                className={`h-8 text-xs ${passwordError ? "border-red-400 focus:ring-red-500" : "border-blue-300 focus:ring-blue-500"}`}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Leave blank to keep current"
+              />
+              {passwordError && (
+                <p className="mt-1 text-[10px] font-semibold text-red-600">
+                  {passwordError}
+                </p>
+              )}
             </div>
           </div>
 
@@ -386,7 +456,7 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
             <Button
               className="flex-1 bg-secondary hover:bg-secondary/90 text-white text-[10px] font-bold uppercase h-8 disabled:opacity-50"
               onClick={handleSave}
-              disabled={loading}
+              disabled={loading || !!passwordError || deactivating}
             >
               {loading ? "SAVING..." : "SAVE CHANGES"}
             </Button>
@@ -394,10 +464,52 @@ export function EditProfileModal({ open, onOpenChange, onSave }: EditProfileModa
               variant="outline"
               className="flex-1 text-[10px] font-bold h-8"
               onClick={() => onOpenChange(false)}
-              disabled={loading}
+              disabled={loading || deactivating}
             >
               CANCEL
             </Button>
+          </div>
+
+          {/* ── Danger zone: self-deactivation ─────────────────────────── */}
+          <div className="mt-1 pt-2 border-t border-red-100">
+            {!confirmDeactivate ? (
+              <button
+                type="button"
+                onClick={() => setConfirmDeactivate(true)}
+                disabled={loading || deactivating}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                Deactivate Account
+              </button>
+            ) : (
+              <div className="rounded-md border border-red-200 bg-red-50 p-2.5 space-y-2">
+                <div className="flex items-start gap-1.5 text-[10px] font-semibold text-red-700 leading-snug">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Deactivating signs you out and blocks future logins. Only
+                    an administrator can reactivate your account.
+                  </span>
+                </div>
+                <div className="flex flex-row gap-2">
+                  <Button
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold uppercase h-8 disabled:opacity-50"
+                    onClick={handleDeactivate}
+                    disabled={deactivating}
+                  >
+                    {deactivating ? "DEACTIVATING..." : "YES, DEACTIVATE"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 text-[10px] font-bold h-8"
+                    onClick={() => setConfirmDeactivate(false)}
+                    disabled={deactivating}
+                  >
+                    KEEP ACCOUNT
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>

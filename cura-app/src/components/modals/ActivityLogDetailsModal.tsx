@@ -1,17 +1,59 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Calendar, Clock, FileText } from "lucide-react";
+import { toast } from "sonner";
 import { ActivityLog } from "@/lib/api/activity-logs";
+import { getReferralById, getReferralByChartNumber, Referral } from "@/lib/api/referrals";
+import { ViewDetailsModal } from "@/components/modals/ViewDetailsModal";
 
 interface ActivityLogDetailsModalProps {
   log: ActivityLog | null;
   isOpen: boolean;
   onClose: () => void;
+  // When provided, the description's first/second-person pronouns ("You",
+  // "your") are rewritten to the actor's name so admins reviewing other
+  // users' logs see neutral, third-person phrasing.
+  actorName?: string;
 }
 
-export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDetailsModalProps) {
-  if (!isOpen || !log) return null;
+// Rewrites first/second-person pronouns in an activity-log description into
+// third-person using the actor's name. Preserves the original casing of the
+// matched word to keep all-caps / title-case tables looking right.
+export function depersonalizeDescription(description: string, actorName?: string): string {
+  if (!actorName) return description;
+  const name = actorName.trim();
+  if (!name) return description;
+  const possessive = `${name}'s`;
+  return description
+    // "Your" / "your" / "YOUR" → possessive form
+    .replace(/\byour\b/gi, (m) => {
+      if (m === m.toUpperCase()) return possessive.toUpperCase();
+      return possessive;
+    })
+    // "You" / "you" / "YOU" → name (preserve casing of leading character)
+    .replace(/\byou\b/gi, (m) => {
+      if (m === m.toUpperCase()) return name.toUpperCase();
+      return name;
+    });
+}
+
+export function ActivityLogDetailsModal({ log, isOpen, onClose, actorName }: ActivityLogDetailsModalProps) {
+  // Track when we're on the client so createPortal doesn't blow up during SSR.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // Deep-link state: when a chart number is clicked we resolve it to a
+  // Referral and hand it off to ViewDetailsModal.
+  const [linkedReferral, setLinkedReferral] = useState<Referral | null>(null);
+  const [resolvingReferral, setResolvingReferral] = useState(false);
+
+  if (!mounted) return null;
+  // Stay mounted while the deep-linked View Details modal is open even after
+  // the activity dialog has been dismissed — otherwise the secondary modal
+  // unmounts before the user sees it.
+  if ((!isOpen || !log) && !linkedReferral) return null;
 
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -54,7 +96,9 @@ export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDet
       'UPDATE_EVENT': 'Updated Event',
       'DELETE_EVENT': 'Deleted Event',
     };
-    return actionMap[action] || action;
+    // Fallback: turn the raw enum-style code into something readable, e.g.
+    // `DECLINE_EDIT_REQUEST` → `DECLINE EDIT REQUEST`.
+    return actionMap[action] || action.replace(/_/g, " ");
   };
 
   const getActionColor = (action: string) => {
@@ -68,15 +112,20 @@ export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDet
   // Parse metadata if it exists
   let metadata: any = null;
   try {
-    if (log.metadata) {
+    if (log?.metadata) {
       metadata = JSON.parse(log.metadata);
     }
   } catch (e) {
     console.error('Error parsing metadata:', e);
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 pb-6">
+  // Portal to <body> so the fixed-position overlay isn't trapped by any
+  // transformed ancestor (e.g. the page's `.animate-enter` wrapper) and
+  // covers the entire viewport, sidebar and header included.
+  return createPortal(
+    <>
+    {isOpen && log && (
+    <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-20 px-4 pb-6">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -111,53 +160,43 @@ export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDet
               <FileText className="h-3 w-3 text-secondary" />
               <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide">Description</h3>
             </div>
-            <p className="text-xs text-gray-800 break-words">{log.description}</p>
+            <p className="text-xs text-gray-800 break-words">
+              {renderDescriptionWithChartLinks(
+                depersonalizeDescription(log.description, actorName),
+                metadata,
+                async (chartNumber) => {
+                  if (resolvingReferral) return;
+                  setResolvingReferral(true);
+                  console.log("[ActivityLog] Resolving referral for chart", chartNumber, "metadata:", metadata);
+                  // Prefer the referral_id stored in metadata — it's the
+                  // canonical pointer and immune to chart-number reuse.
+                  let referral: Referral | null = null;
+                  if (metadata?.referral_id) {
+                    referral = await getReferralById(metadata.referral_id);
+                    console.log("[ActivityLog] getReferralById →", referral);
+                  }
+                  if (!referral) {
+                    referral = await getReferralByChartNumber(chartNumber);
+                    console.log("[ActivityLog] getReferralByChartNumber →", referral);
+                  }
+                  setResolvingReferral(false);
+                  if (referral) {
+                    // Dismiss the activity dialog first so the View Details
+                    // modal (Radix Dialog, lower default z-index) isn't
+                    // stacked behind this portal.
+                    setLinkedReferral(referral);
+                    onClose();
+                  } else {
+                    // Most common cause: the referral was deleted after the
+                    // log entry was written. Tell the user instead of
+                    // silently doing nothing.
+                    toast.error(`Referral ${chartNumber} could not be found. It may have been deleted.`);
+                  }
+                },
+                resolvingReferral,
+              )}
+            </p>
           </div>
-
-          {/* Referral Details (if available) */}
-          {metadata && (metadata.chart_number || metadata.destination || metadata.referral_id) && (
-            <div className="bg-purple-50 rounded-lg p-2.5 sm:p-3 border border-purple-200">
-              <h3 className="text-[10px] font-bold text-purple-700 uppercase tracking-wide mb-2">Referral Details</h3>
-              <div className="space-y-1.5">
-                {metadata.chart_number && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-purple-700">Chart Number: </span>
-                    <span className="text-xs text-gray-800">{metadata.chart_number}</span>
-                  </div>
-                )}
-                {metadata.age && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-purple-700">Patient Age: </span>
-                    <span className="text-xs text-gray-800">{metadata.age} years old</span>
-                  </div>
-                )}
-                {metadata.destination && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-purple-700">Destination: </span>
-                    <span className="text-xs text-gray-800">{metadata.destination}</span>
-                  </div>
-                )}
-                {metadata.medical_alert && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-purple-700">Medical Alert: </span>
-                    <span className="text-xs text-red-600 font-medium">{metadata.medical_alert}</span>
-                  </div>
-                )}
-                {metadata.accepted_by && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-purple-700">Accepted By: </span>
-                    <span className="text-xs text-gray-800">{metadata.accepted_by}</span>
-                  </div>
-                )}
-                {metadata.referral_id && (
-                  <div>
-                    <span className="text-[10px] font-semibold text-purple-700">Referral ID: </span>
-                    <span className="text-xs text-gray-800 font-mono break-all">{metadata.referral_id}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Event Details (if available) */}
           {metadata && (metadata.title || metadata.event_id) && (
@@ -259,5 +298,56 @@ export function ActivityLogDetailsModal({ log, isOpen, onClose }: ActivityLogDet
         </div>
       </div>
     </div>
+    )}
+    {/* Deep-link target: opens the standard View Details modal when the
+        chart number in the description is clicked. */}
+    <ViewDetailsModal
+      referral={linkedReferral}
+      isOpen={!!linkedReferral}
+      onClose={() => setLinkedReferral(null)}
+    />
+    </>,
+    document.body,
   );
+}
+
+// ─── Description renderer ──────────────────────────────────────────────────
+// Splits the description on the chart-number pattern (`YYYY-NNNNN`) and
+// renders each match as a clickable link that resolves the referral via the
+// supplied callback. Falls back to plain text if no match is found.
+function renderDescriptionWithChartLinks(
+  description: string,
+  metadata: any,
+  onChartClick: (chartNumber: string) => void,
+  loading: boolean,
+): React.ReactNode {
+  // Match a year-prefixed chart number, e.g. 2026-00130. The trailing digits
+  // are bounded between 3 and 6 to stay generous without accidentally
+  // grabbing date-like sequences.
+  const regex = /(\b\d{4}-\d{3,6}\b)/g;
+  const parts = description.split(regex);
+  if (parts.length === 1) {
+    // No chart number in the text — render as plain text.
+    return description;
+  }
+  return parts.map((part, idx) => {
+    if (regex.test(part)) {
+      // `regex.test` advances lastIndex on global regexes — reset before the
+      // next iteration so subsequent splits still work as expected.
+      regex.lastIndex = 0;
+      const chartNumber = part;
+      return (
+        <button
+          key={idx}
+          type="button"
+          disabled={loading}
+          onClick={() => onChartClick(chartNumber)}
+          className="font-semibold text-secondary underline underline-offset-2 hover:text-secondary/80 disabled:opacity-50 disabled:cursor-wait"
+        >
+          {chartNumber}
+        </button>
+      );
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
 }

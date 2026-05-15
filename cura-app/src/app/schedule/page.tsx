@@ -179,8 +179,13 @@ function SchedulePageInner() {
       const newAdviseeIds = new Set<string>();
 
       if (clinicalAdmin && caId) {
-        const [allData, overrides] = await Promise.all([
+        // Clinic-wide referral feed + the chair/admin's own personal events.
+        // Without `ownData` they'd never see calendar entries they created
+        // themselves via the "+" button (those are stored under their
+        // user_id but excluded from `getAllReferralEvents`).
+        const [allData, ownData, overrides] = await Promise.all([
           getAllReferralEvents(),
+          getEvents(),
           getEventOverrides(caId),
         ]);
         const userIds = new Set<string>((allData || []).map((e: any) => e.user_id).filter(Boolean));
@@ -201,7 +206,19 @@ function SchedulePageInner() {
             advisee_name: nameMap[e.user_id] || "Clinician",
           };
         });
-        const clinicianNameList = Array.from(new Set(taggedEvents.map((e: any) => e.advisee_name))) as string[];
+        // Merge own personal events, deduping by id (own referral events
+        // already appear in `taggedEvents`). Personal events keep their own
+        // color/favorite from the events row — no override needed since
+        // they belong to the current user.
+        const seen = new Set(taggedEvents.map((e: any) => e.id));
+        (ownData || []).forEach((e: any) => {
+          if (!seen.has(e.id)) {
+            taggedEvents.push({ ...e });
+          }
+        });
+        const clinicianNameList = Array.from(new Set(
+          taggedEvents.map((e: any) => e.advisee_name).filter(Boolean)
+        )) as string[];
         setAdviseeNames(clinicianNameList);
         setEvents(taggedEvents);
         setLoading(false);
@@ -486,6 +503,12 @@ function SchedulePageInner() {
     return events.filter(event => {
       const eventStart = new Date(event.start_time);
       const eventEnd = new Date(event.end_time);
+
+      // Hide events whose start time falls outside the calendar's visible
+      // 6 AM – 6 PM window so out-of-range items never render on the grid.
+      const startHour = eventStart.getHours();
+      if (startHour < 6 || startHour >= 18) return false;
+
       const slotStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hours, minutes, 0, 0);
       const slotEnd = new Date(slotStart);
       slotEnd.setMinutes(slotEnd.getMinutes() + 30);
@@ -809,7 +832,13 @@ function SchedulePageInner() {
                       const evEnd = new Date(ev.end_time);
                       const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
                       const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
-                      return evStart <= dayEnd && evEnd >= dayStart;
+                      if (!(evStart <= dayEnd && evEnd >= dayStart)) return false;
+
+                      // Hide events that fall outside the calendar's visible
+                      // 6 AM – 6 PM window (start before 6 AM or at/after 6 PM).
+                      const startHour = evStart.getHours();
+                      if (startHour < 6 || startHour >= 18) return false;
+                      return true;
                     });
                     const assigned = assignColumns(dayEvents);
 
@@ -1455,16 +1484,16 @@ function SchedulePageInner() {
             onClick={() => setIsSaveConfirmOpen(false)}
           />
 
-          {/* Confirmation Modal */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+          {/* Confirmation Modal — mirrors Approve Rereferral Request style */}
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
             <div className="text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-secondary/10 mb-4">
                 <svg className="h-6 w-6 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h3 className="text-lg font-bold text-secondary mb-2">{isEditMode ? 'Save Changes' : 'Create Event'}</h3>
-              <p className="text-sm text-gray-600 mb-6">
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">{isEditMode ? 'Save Changes' : 'Create Event'}</h3>
+              <p className="text-sm text-muted-foreground mb-6">
                 {isEditMode 
                   ? 'Are you sure you want to save the changes to this event?' 
                   : 'Are you sure you want to create this event?'}
@@ -1472,13 +1501,13 @@ function SchedulePageInner() {
               <div className="flex gap-3">
                 <button
                   onClick={confirmSaveEvent}
-                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded-lg hover:bg-secondary/90 transition-colors"
+                  className="flex-1 px-6 py-2 bg-secondary text-white text-xs font-bold rounded hover:bg-secondary/90 transition-colors shadow uppercase tracking-wide"
                 >
                   {isEditMode ? 'YES, SAVE CHANGES' : 'YES, CREATE'}
                 </button>
                 <button
                   onClick={() => setIsSaveConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
                 >
                   CANCEL
                 </button>
@@ -1497,31 +1526,31 @@ function SchedulePageInner() {
             onClick={() => setIsDeleteConfirmOpen(false)}
           />
 
-          {/* Confirmation Modal */}
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+          {/* Confirmation Modal — mirrors Approve Rereferral Request style (red theme) */}
+          <div className="relative bg-white rounded shadow-2xl border-2 border-gray-300 w-full max-w-md mx-4 p-6">
             <div className="text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
                 <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
               </div>
-              <h3 className="text-lg font-bold text-secondary mb-2">Delete Event</h3>
-              <p className="text-sm text-gray-600 mb-2">
+              <h3 className="text-lg font-bold text-secondary mb-2 uppercase tracking-wide">Delete Event</h3>
+              <p className="text-sm text-muted-foreground mb-2">
                 Are you sure you want to delete <span className="font-semibold">"{eventToDelete?.title}"</span>?
               </p>
-              <p className="text-xs text-gray-500 mb-6">
+              <p className="text-xs text-muted-foreground/80 mb-6">
                 This action cannot be undone.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={confirmDeleteEvent}
-                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors"
+                  className="flex-1 px-6 py-2 bg-red-600 text-white text-xs font-bold rounded hover:bg-red-700 transition-colors shadow uppercase tracking-wide"
                 >
                   YES, DELETE
                 </button>
                 <button
                   onClick={() => setIsDeleteConfirmOpen(false)}
-                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-6 py-2 border-2 border-gray-300 text-gray-700 text-xs font-bold rounded hover:bg-muted transition-colors uppercase tracking-wide"
                 >
                   CANCEL
                 </button>

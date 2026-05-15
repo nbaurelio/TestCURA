@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProfileCard } from "@/components/sidebar/ProfileCard";
@@ -24,10 +25,24 @@ export default function CompletedReferralsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCategory, setSearchCategory] = useState("medical_alert");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+  const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
+  const statusFilterRef = useRef<HTMLDivElement>(null);
 
   const handleHeaderSearch = useCallback((query: string, category: string) => {
     setSearchQuery(query);
     setSearchCategory(category);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setIsSortOpen(false);
+      if (statusFilterRef.current && !statusFilterRef.current.contains(e.target as Node)) setIsStatusFilterOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   useEffect(() => {
@@ -78,12 +93,19 @@ export default function CompletedReferralsPage() {
         referral.is_featured &&
         referral.accepted_by &&
         referral.accepted_by !== "None" &&
-        (acceptedReferralIds.has(referral.id) || referral.accepted_by_user_id === currentUserId) &&
+        // STRICT: Only show referrals where current user is the acceptor
+        referral.accepted_by_user_id === currentUserId &&
         referral.referral_status &&
         COMPLETED_STATUSES.includes(referral.referral_status.toLowerCase()) &&
-        !(referral as any).status_change_reason
-    ).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [referrals, acceptedReferralIds, logsLoaded, currentUserId]);
+        !(referral as any).status_change_reason &&
+        // Exclude referrals that have been sent back to system (completed rereferral)
+        (referral as any).rerefer_request_status !== "completed"
+    ).sort((a, b) => {
+      const aTs = new Date(a.referral_status_changed_at ?? a.created_at).getTime();
+      const bTs = new Date(b.referral_status_changed_at ?? b.created_at).getTime();
+      return sortOrder === "newest" ? bTs - aTs : aTs - bTs;
+    });
+  }, [referrals, acceptedReferralIds, logsLoaded, currentUserId, sortOrder]);
 
   const filteredReferrals = useMemo(() => {
     if (statusFilter === "all") return completedReferrals;
@@ -151,16 +173,60 @@ export default function CompletedReferralsPage() {
             {/* Page Header */}
             <div className="bg-secondary text-white text-sm font-bold py-3 px-5 rounded shadow mb-5 uppercase tracking-wide flex items-center justify-between">
               <span>ARCHIVED REFERRALS</span>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                className="bg-white/10 border border-white/30 text-white text-[11px] font-semibold rounded px-2 py-1 uppercase tracking-wide cursor-pointer focus:outline-none focus:ring-1 focus:ring-white/50"
-              >
-                <option value="all" className="bg-secondary text-white">All</option>
-                <option value="completed" className="bg-secondary text-white">Completed</option>
-                <option value="deferred" className="bg-secondary text-white">Deferred</option>
-                <option value="blacklisted" className="bg-secondary text-white">Blacklisted</option>
-              </select>
+              <div className="flex items-center gap-2">
+                <div ref={sortRef} className="relative normal-case tracking-normal">
+                  <button
+                    type="button"
+                    onClick={() => setIsSortOpen(p => !p)}
+                    className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 transition-colors text-white text-[11px] font-bold uppercase tracking-wide px-3 py-1.5 rounded border border-white/30"
+                  >
+                    <span>Sort by: {sortOrder === "newest" ? "Newest" : "Oldest"}</span>
+                    <ChevronDown className={`h-3 w-3 transition-transform ${isSortOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {isSortOpen && (
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden min-w-[120px]">
+                      {(["newest", "oldest"] as const).map(opt => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => { setSortOrder(opt); setIsSortOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
+                            sortOrder === opt ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"
+                          }`}
+                        >
+                          {opt === "newest" ? "Newest" : "Oldest"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div ref={statusFilterRef} className="relative normal-case tracking-normal">
+                  <button
+                    type="button"
+                    onClick={() => setIsStatusFilterOpen(p => !p)}
+                    className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 transition-colors text-white text-[11px] font-bold uppercase tracking-wide px-3 py-1.5 rounded border border-white/30"
+                  >
+                    <span>{statusFilter === "all" ? "All" : statusFilter === "completed" ? "Completed" : statusFilter === "deferred" ? "Deferred" : "Blacklisted"}</span>
+                    <ChevronDown className={`h-3 w-3 transition-transform ${isStatusFilterOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {isStatusFilterOpen && (
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden min-w-[120px]">
+                      {(["all", "completed", "deferred", "blacklisted"] as const).map(opt => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => { setStatusFilter(opt); setIsStatusFilterOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-xs font-semibold transition-colors ${
+                            statusFilter === opt ? "bg-secondary text-white" : "text-gray-700 hover:bg-secondary/10 hover:text-secondary"
+                          }`}
+                        >
+                          {opt === "all" ? "All" : opt === "completed" ? "Completed" : opt === "deferred" ? "Deferred" : "Blacklisted"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Completed Referrals List */}
@@ -179,6 +245,7 @@ export default function CompletedReferralsPage() {
                     key={referral.id}
                     id={referral.id}
                     title={`Referring ${referral.age} yr. old patient for ${referral.treatment_service_destination}${referral.special_case ? ` (${referral.special_case})` : ''}`}
+                    specialCase={referral.special_case || undefined}
                     medicalAlert={referral.medical_alert || undefined}
                     clinicalSectionOrigin={referral.clinical_section_origin || undefined}
                     clinicalSectionDestination={referral.clinical_section_destination}
@@ -191,6 +258,7 @@ export default function CompletedReferralsPage() {
                     acceptedBy={referral.accepted_by || undefined}
                     acceptedAt={referral.accepted_at}
                     status={referral.status}
+                    createdAt={referral.created_at}
                     showAccept={false}
                     showUpdate={false}
                     age={referral.age ?? undefined}

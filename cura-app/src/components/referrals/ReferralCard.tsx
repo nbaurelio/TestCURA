@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ViewDetailsModal } from "@/components/modals/ViewDetailsModal";
 import { EditReferralModal } from "@/components/modals/EditReferralModal";
-import { Referral, submitEditRequest, submitRereferRequest, submitDeletionRequest, sendBackToSystem } from "@/lib/api/referrals";
+import { Referral, submitEditRequest, submitRereferRequest, submitDeletionRequest, sendBackToSystem, notifyRoutedProfessors } from "@/lib/api/referrals";
 import { getCurrentUserId, getProfessors, Profile } from "@/lib/api/profiles";
 import { sendSystemNotification } from "@/lib/utils/notify";
 import { supabase } from "@/lib/supabase";
@@ -539,7 +539,13 @@ export function ReferralCard({
     deletion_request_status: null,
     deletion_requested_by: null,
     deletion_requested_at: null,
-    created_at: createdAt || new Date().toISOString(),
+    // IMPORTANT: do NOT fall back to new Date() here. Earlier this silently
+    // fabricated today's timestamp whenever a page forgot to pass
+    // `createdAt`, which made the "Referral Start" reset to "now" on every
+    // page besides /home. Keep the prop value as-is so callers must supply
+    // a real timestamp; downstream consumers (e.g. ViewDetailsModal) already
+    // handle missing values gracefully.
+    created_at: createdAt || "",
   }), [id, userId, chartNumber, treatment, ageProp, medicalAlert, clinicalSectionOrigin, clinicalSectionDestination,
       clinicalDisciplineOrigin, clinicalDisciplineDestination, treatmentServiceOrigin, treatmentServiceDestination,
       specialCase, tentativeAppointment, medicalHistory, notesAndIndications, status, isFeatured, acceptedBy,
@@ -870,12 +876,21 @@ export function ReferralCard({
               Pending Deletion
             </div>
           )}
-          {statusChangeReason && (
-            <div className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 bg-yellow-50 border-yellow-500 text-yellow-700 flex items-center gap-1">
-              <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              Pending Status Change
-            </div>
-          )}
+          {statusChangeReason && (() => {
+            // `status_change_reason` is stored as "<target>::<reason>" where
+            // <target> is "deferred", "blacklisted", or "completed". Default
+            // to "deferred" if the prefix is missing (legacy rows).
+            const target = statusChangeReason.includes("::")
+              ? statusChangeReason.split("::")[0]
+              : "deferred";
+            const label = target === "blacklisted" ? "Pending Blacklist" : target === "completed" ? "Pending Completion" : "Pending Deferral";
+            return (
+              <div className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 bg-yellow-50 border-yellow-500 text-yellow-700 flex items-center gap-1">
+                <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                {label}
+              </div>
+            );
+          })()}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1147,7 +1162,12 @@ export function ReferralCard({
                     key={option.value}
                     type="button"
                     onClick={() => {
-                      if (option.value === "deferred" || option.value === "blacklisted") {
+                      // Completed, Deferred, and Blacklisted all require professor
+                      // approval — they open the StatusChangeReasonDialog which
+                      // routes a request via `status_change_reason` +
+                      // `status_change_professor_ids` (no immediate status flip).
+                      // Only Ongoing is applied directly via `onStatusChange`.
+                      if (option.value === "deferred" || option.value === "blacklisted" || option.value === "completed") {
                         setPendingStatus(option.value);
                         setIsStatusPickerOpen(false);
                       } else {
@@ -1182,12 +1202,28 @@ export function ReferralCard({
         onCancel={() => setPendingStatus(null)}
         onSubmit={async (reason, professorIds) => {
           if (!pendingStatus) return;
+          const { error: scError } = await (supabase.from("referrals") as any).update({
+            status_change_reason: `${pendingStatus}::${reason}`,
+            status_change_professor_ids: professorIds,
+            status_change_requested_at: new Date().toISOString(),
+          } as any).eq("id", id);
+          if (scError) {
+            console.error("Status change update failed:", scError);
+            alert(`Failed to submit request: ${scError.message}`);
+            setPendingStatus(null);
+            return;
+          }
           try {
-            await (supabase.from("referrals") as any).update({
-              status_change_reason: `${pendingStatus}::${reason}`,
-              status_change_professor_ids: professorIds,
-            } as any).eq("id", id);
-          } catch {}
+            await notifyRoutedProfessors("INCOMING_STATUS_CHANGE_REQUEST", professorIds, {
+              referralId: id,
+              chartNumber: chartNumber || null,
+              requesterId: getCurrentUserId(),
+              reason,
+              targetStatus: pendingStatus,
+            });
+          } catch (notifyErr) {
+            console.warn("Notification failed:", notifyErr);
+          }
           setPendingStatus(null);
           onEditRequestSubmitted?.();
           sendSystemNotification(
@@ -1335,7 +1371,13 @@ export function FeaturedReferralCard({
     deletion_request_status: null,
     deletion_requested_by: null,
     deletion_requested_at: null,
-    created_at: createdAt || new Date().toISOString(),
+    // IMPORTANT: do NOT fall back to new Date() here. Earlier this silently
+    // fabricated today's timestamp whenever a page forgot to pass
+    // `createdAt`, which made the "Referral Start" reset to "now" on every
+    // page besides /home. Keep the prop value as-is so callers must supply
+    // a real timestamp; downstream consumers (e.g. ViewDetailsModal) already
+    // handle missing values gracefully.
+    created_at: createdAt || "",
   };
 
   const handleEditRequestSubmit = async (reason: string, professorIds: string[]) => {

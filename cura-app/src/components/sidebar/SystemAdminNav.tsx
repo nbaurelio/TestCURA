@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { Users, Activity, LogOut, ShieldCheck, Pencil } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/context/AuthContext";
-import { getMockUserProfileSync, hasProfileCache } from "@/lib/api/profiles";
 import { EditProfileModal } from "@/components/modals/EditProfileModal";
 
 /**
@@ -18,9 +17,8 @@ import { EditProfileModal } from "@/components/modals/EditProfileModal";
  */
 export function SystemAdminNav() {
   const pathname = usePathname();
-  const { logout } = useAuth();
+  const { logout, user: profile, refreshUser } = useAuth();
   const [editOpen, setEditOpen] = useState(false);
-  const profile = getMockUserProfileSync();
 
   const displayName = profile
     ? `${profile.first_name} ${profile.last_name}`
@@ -39,7 +37,7 @@ export function SystemAdminNav() {
 
   return (
     <>
-      <EditProfileModal open={editOpen} onOpenChange={setEditOpen} />
+      <EditProfileModal open={editOpen} onOpenChange={setEditOpen} onSave={refreshUser} />
       <div
         className="relative rounded-xl border-2 border-secondary/60 bg-gradient-to-b from-white to-secondary/5 overflow-hidden flex flex-col"
         style={{

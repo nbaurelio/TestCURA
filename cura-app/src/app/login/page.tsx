@@ -4,9 +4,17 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import Image from "next/image";
-import { getProfile } from "@/lib/api/profiles";
+import { getProfile, getProfileByEmail, updateProfile } from "@/lib/api/profiles";
 import { useAuth } from "@/context/AuthContext";
+
+/**
+ * Number of consecutive wrong-password attempts before the account is
+ * automatically locked. This is distinct from user-initiated deactivation —
+ * LOCKED means "security lockout", INACTIVE means "user opted out".
+ */
+const MAX_LOGIN_ATTEMPTS = 5;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,6 +39,7 @@ export default function LoginPage() {
     "miguel@example.com": "bbbb2222-2222-2222-2222-222222222222",
     "sarah@example.com": "bbbb3333-3333-3333-3333-333333333333",
     "admin@example.com": "cccc0000-0000-0000-0000-000000000000",
+    "sysadmin@example.com": "dddd0000-0000-0000-0000-000000000000",
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -42,41 +51,97 @@ export default function LoginPage() {
       return;
     }
 
-    // Match email to a test account
-    const userId = TEST_ACCOUNTS[email.toLowerCase()];
-    if (!userId) {
-      setError("Account not found. Try test@example.com, juan@example.com, prof1@example.com, prof2@example.com, carlos@example.com, maria.c@example.com, or jose@example.com");
-      return;
-    }
-
     setIsLoggingIn(true);
     setError("");
 
-    // Store the current user ID in localStorage
-    localStorage.setItem("currentUserId", userId);
+    // Look up the account by the email entered. This is what makes the
+    // System Admin's "Edit Profile" credentials authoritative — change the
+    // email in the dialog and the user logs in with the new email next time.
+    const profile = await getProfileByEmail(email);
 
-    // Fetch profile and refresh auth context in parallel
-    const [profile] = await Promise.all([
-      getProfile(userId),
-      refreshUser(),
-    ]);
+    // Backwards-compat: legacy seed accounts may exist in TEST_ACCOUNTS but
+    // not yet have an email row in the database, or have a NULL password
+    // column. Fall back to the hardcoded map so existing flows keep working.
+    let resolvedProfile = profile;
+    if (!resolvedProfile) {
+      const fallbackId = TEST_ACCOUNTS[email.toLowerCase()];
+      if (fallbackId) resolvedProfile = await getProfile(fallbackId);
+    }
 
-    if (!profile) {
-      setError("Could not load user profile.");
+    if (!resolvedProfile) {
+      setError("Account not found.");
       setIsLoggingIn(false);
       return;
     }
 
+    // ── Status gates ────────────────────────────────────────────────────
+    // Checked BEFORE the password so a locked-out attacker can't keep
+    // burning attempts and the user gets the most accurate reason.
+    const status = (resolvedProfile as any).status;
+    if (status === "INACTIVE") {
+      setError("This account has been deactivated. Contact an administrator to reactivate it.");
+      setIsLoggingIn(false);
+      return;
+    }
+    if (status === "LOCKED") {
+      setError(`This account is locked after ${MAX_LOGIN_ATTEMPTS} failed login attempts. Contact an administrator to unlock it.`);
+      setIsLoggingIn(false);
+      return;
+    }
+
+    // ── Password verification with auto-lock ────────────────────────────
+    // NULL/undefined password means the profile is in legacy/mock mode and
+    // accepts any password — those accounts skip the counter entirely.
+    const storedPassword = (resolvedProfile as any).password;
+    if (storedPassword && storedPassword !== password) {
+      const prevAttempts = (resolvedProfile as any).failed_login_attempts ?? 0;
+      const nextAttempts = prevAttempts + 1;
+
+      if (nextAttempts >= MAX_LOGIN_ATTEMPTS) {
+        // Hit the threshold — flip the account to LOCKED and stop counting.
+        await updateProfile(resolvedProfile.id, {
+          failed_login_attempts: nextAttempts,
+          status: "LOCKED",
+        } as any);
+        setError(`Account locked after ${MAX_LOGIN_ATTEMPTS} failed attempts. Contact an administrator to unlock it.`);
+      } else {
+        await updateProfile(resolvedProfile.id, {
+          failed_login_attempts: nextAttempts,
+        } as any);
+        const remaining = MAX_LOGIN_ATTEMPTS - nextAttempts;
+        setError(`Incorrect password. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before this account is locked.`);
+      }
+      setIsLoggingIn(false);
+      return;
+    }
+
+    // ── Successful login ────────────────────────────────────────────────
+    // Reset the counter so partial failures don't carry across sessions and
+    // bump `last_active_at` so the inactivity check (1-year auto-INACTIVE
+    // in the System Admin users page) sees a fresh activity timestamp.
+    const loginUpdates: Record<string, any> = { last_active_at: new Date().toISOString() };
+    if (((resolvedProfile as any).failed_login_attempts ?? 0) > 0) {
+      loginUpdates.failed_login_attempts = 0;
+    }
+    await updateProfile(resolvedProfile.id, loginUpdates as any);
+
+    // Store the resolved user ID and refresh auth context.
+    localStorage.setItem("currentUserId", resolvedProfile.id);
+    await refreshUser();
+    const profileForRedirect = resolvedProfile;
+
     // Trigger exit animation
-    setWelcomeName(profile.first_name || "User");
+    setWelcomeName(profileForRedirect.first_name || "User");
     setIsTransitioning(true);
 
-    // Wait for animation, then redirect
+    // Wait for animation, then redirect based on the resolved profile.
     setTimeout(() => {
-      if (profile.role === "clinical_admin") {
+      if (profileForRedirect.role === "clinical_admin") {
         router.replace("/clinical-admin");
-      } else if (profile.role === "professor") {
+      } else if (profileForRedirect.role === "professor") {
         router.replace("/professor");
+      } else if (profileForRedirect.role === "system_admin") {
+        router.replace("/system-admin");
       } else {
         router.replace("/home");
       }
@@ -171,9 +236,8 @@ export default function LoginPage() {
               <label htmlFor="password" className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">
                 Password
               </label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="h-8 text-xs border-gray-300 focus:ring-secondary"

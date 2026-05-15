@@ -26,6 +26,8 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [creatorName, setCreatorName] = useState<string>("");
+  const [originalCreatorId, setOriginalCreatorId] = useState<string>("");
+  const [originalCreatedAt, setOriginalCreatedAt] = useState<string>("");
   const [editorName, setEditorName] = useState<string>("");
   const [editorId, setEditorId] = useState<string | null>(null);
   const [lastEditedAt, setLastEditedAt] = useState<string | null>(null);
@@ -51,6 +53,8 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
       setVersions([]);
       setCurrentIndex(0);
       setCreatorName("");
+      setOriginalCreatorId("");
+      setOriginalCreatedAt("");
       setEditorName("");
       setLastEditedAt(null);
       setStatusHistory([]);
@@ -84,8 +88,15 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
     
     const fetchUserInfo = async () => {
       try {
-        // Fetch creator info
-        const creatorProfile = await getProfile(referral.user_id);
+        // Fetch creator info — prefer the original CREATE_REFERRAL snapshot so that
+        // rereferral cycles (where user_id may be stale) still show the true first creator.
+        const history = await getReferralHistory(referral.id);
+        const originalVersion = history.find(v => v.action === "CREATE_REFERRAL") ?? history[0];
+        const originalUserId = originalVersion?.snapshot?.user_id ?? referral.user_id;
+        const originalTs = originalVersion?.snapshot?.created_at ?? referral.created_at;
+        setOriginalCreatorId(originalUserId);
+        setOriginalCreatedAt(originalTs);
+        const creatorProfile = await getProfile(originalUserId);
         if (creatorProfile) {
           setCreatorName(`${creatorProfile.first_name} ${creatorProfile.last_name}`);
         }
@@ -149,10 +160,18 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
           // 2. Final status — completed/deferred/blacklisted
           const finalStatus = referral.referral_status?.toLowerCase();
           if (finalStatus && finalStatus !== "ongoing" && ["completed", "deferred", "blacklisted"].includes(finalStatus)) {
+            // All final statuses (completed/deferred/blacklisted) require professor approval.
+            // Fetch status_change_approved_by live from DB (prop may be stale).
+            const { data: liveApprover } = await (supabase.from("referrals") as any)
+              .select("status_change_approved_by")
+              .eq("id", referral.id)
+              .single();
+            const approverId = (liveApprover as any)?.status_change_approved_by as string | null | undefined;
+            const changedBy = approverId || referral.accepted_by_user_id || null;
             syntheticHistory.push({
               status: finalStatus,
               timestamp: referral.referral_status_changed_at || new Date().toISOString(),
-              changedBy: referral.accepted_by_user_id || null,
+              changedBy,
             });
           }
           history = syntheticHistory;
@@ -348,20 +367,83 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
                           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]
                       : null;
                     // REREFER: approval comes AFTER the rerefer snapshot → find earliest approval after versionTs
-                    const rereferApprover = currentVersion.action === "REREFER_REQUEST"
+                    const rereferApproverForThis = currentVersion.action === "REREFER_REQUEST"
                       ? approvalEvents
                           .filter(e => e.action === "APPROVE_REREFER_REQUEST" && new Date(e.timestamp).getTime() >= versionTs)
                           .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0]
                       : null;
-                    const matchedApprover = editApprover ?? rereferApprover;
+
+                    // CYCLE-ORIGIN REREFER: when the current version is an
+                    // UPDATE that sits inside a rerefer cycle, walk back to
+                    // the most recent REREFER_REQUEST version and surface
+                    // that as the cycle origin (so the header shows both the
+                    // "Rereferred" and the "Edited" lines, each with its
+                    // own approver). Without this the modal mislabels a
+                    // rereferred-then-edited version as just "Updated".
+                    let rereferCycleVersion: typeof currentVersion | null = null;
+                    let rereferCycleApprover: { approverName: string } | null = null;
+                    if (currentVersion.action === "UPDATE_REFERRAL") {
+                      for (let i = currentIndex - 1; i >= 0; i--) {
+                        const v = versions[i];
+                        if (v.action === "REREFER_REQUEST") {
+                          rereferCycleVersion = v;
+                          const vTs = new Date(v.timestamp).getTime();
+                          const nextBoundaryTs = i + 1 < versions.length
+                            ? new Date(versions[i + 1].timestamp).getTime()
+                            : Number.POSITIVE_INFINITY;
+                          rereferCycleApprover = approvalEvents
+                            .filter(e => e.action === "APPROVE_REREFER_REQUEST" &&
+                              new Date(e.timestamp).getTime() >= vTs &&
+                              new Date(e.timestamp).getTime() <= nextBoundaryTs)
+                            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0] || null;
+                          break;
+                        }
+                        if (v.action === "CREATE_REFERRAL") break; // cycle originated with the create, not a rerefer
+                      }
+                    }
+
+                    const isRereferredAndEdited = !!rereferCycleVersion && !isOriginal;
+                    const primaryLabel = isOriginal
+                      ? "Created"
+                      : currentVersion.action === "CREATE_REFERRAL"
+                      ? "Created"
+                      : currentVersion.action === "REREFER_REQUEST"
+                      ? "Rereferred"
+                      : isRereferredAndEdited
+                      ? "Rereferred & Edited"
+                      : "Updated";
+
                     return (
                       <div>
+                        {/* Rereferred-cycle origin line (only when the current
+                            UPDATE version sits inside a rerefer cycle, NOT for original version) */}
+                        {isRereferredAndEdited && rereferCycleVersion && !isOriginal && (
+                          <>
+                            <p className="text-white/55 text-[9px] mt-0.5 truncate">
+                              Rereferred: {formatDateTime(rereferCycleVersion.timestamp)}
+                            </p>
+                            {rereferCycleApprover && (
+                              <p className="text-green-300/80 text-[9px] mt-0.5 truncate">
+                                Approved By: {rereferCycleApprover.approverName}
+                              </p>
+                            )}
+                          </>
+                        )}
+
+                        {/* Primary line for THIS version */}
                         <p className="text-white/55 text-[9px] mt-0.5 truncate">
-                          {currentVersion.action === "CREATE_REFERRAL" ? "Created" : currentVersion.action === "REREFER_REQUEST" ? "Rereferred" : "Updated"}: {formatDateTime(currentVersion.timestamp)}
+                          {isRereferredAndEdited ? "Edited" : primaryLabel}: {formatDateTime(currentVersion.timestamp)}
                         </p>
-                        {matchedApprover && (
+                        {/* Show approver for Edit requests, but NOT for rereferral on original version */}
+                        {editApprover && (
                           <p className="text-green-300/80 text-[9px] mt-0.5 truncate">
-                            Approved By: {matchedApprover.approverName}
+                            Approved By: {editApprover.approverName}
+                          </p>
+                        )}
+                        {/* Show rereferral approver only for NON-original versions */}
+                        {rereferApproverForThis && !isOriginal && (
+                          <p className="text-green-300/80 text-[9px] mt-0.5 truncate">
+                            Approved By: {rereferApproverForThis.approverName}
                           </p>
                         )}
                       </div>
@@ -478,14 +560,20 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
 
           {/* Referral Timeline — duration metrics scoped to current version's cycle */}
           {(() => {
-            // Convert ms to days: <8hrs = 0d, >=8hrs = at least 1d, then round normally.
+            // Duration formatter in days. Sub-day durations render as
+            // "<1 day" instead of "0 days" so freshly-created/accepted
+            // referrals don't all read as zero.
             const msToDays = (ms: number | null): number | null => {
               if (ms === null || ms < 0) return null;
-              const hours = ms / (1000 * 60 * 60);
-              if (hours < 8) return 0;
-              return Math.max(1, Math.round(hours / 24));
+              return ms; // pass raw ms; fmtDays handles unit conversion
             };
-            const fmtDays = (n: number | null) => n === null ? "—" : `${n} day${n === 1 ? "" : "s"}`;
+            const fmtDays = (ms: number | null): string => {
+              if (ms === null || ms < 0) return "—";
+              const hours = ms / (1000 * 60 * 60);
+              if (hours < 24) return "<1 day";
+              const days = Math.round(hours / 24);
+              return `${days} day${days === 1 ? "" : "s"}`;
+            };
 
             // Cycle bounds: from this version's timestamp to next version's timestamp (or now if latest).
             // Special case: for REREFER_REQUEST versions, the cycle only truly starts when the referral
@@ -504,34 +592,51 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
                 )
               : null;
             const sendBackTs = sendBackEvent ? new Date(sendBackEvent.timestamp).getTime() : null;
-            const cycleStartTs = sendBackTs ?? versionStartTs;
-            const cycleEndTs = versionEndTs;
-            const rereferNotSentBack = isRerefer && sendBackTs === null;
+            // For original version: use the original referral creation date
+            // For rereferral cycles: use send-back timestamp or version start
+            const cycleStartTs = isOriginal
+              ? new Date(r.created_at).getTime()
+              : (sendBackTs ?? versionStartTs);
+            const cycleEndTs = isOriginal ? Date.now() : versionEndTs;
+            const rereferNotSentBack = isRerefer && !isOriginal && sendBackTs === null;
 
             // Find acceptance + final-status events within this cycle from statusHistory
+            // For rereferral cycles, we need to find events AFTER the send-back timestamp
             const inCycle = (ts: string) => {
               const t = new Date(ts).getTime();
               return t >= cycleStartTs - 1000 && t <= cycleEndTs + 1000;
             };
-            const acceptedEvent = statusHistory.find(s => s.status === "ongoing" && inCycle(s.timestamp));
+            const afterCycleStart = (ts: string) => {
+              const t = new Date(ts).getTime();
+              return t >= cycleStartTs - 1000;
+            };
+            // Find first acceptance event after cycle start (for rereferrals, this is after send-back)
+            const acceptedEvent = statusHistory
+              .filter(s => s.status === "ongoing" && afterCycleStart(s.timestamp))
+              .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0];
             const finalEvent = statusHistory.find(s =>
               ["completed", "deferred", "blacklisted"].includes(s.status) && inCycle(s.timestamp)
             );
 
             // Fallback to live referral fields when no status-history entry matches and we're on the latest version
             const isLatestVersion = currentIndex === total - 1;
-            const liveAcceptedTs = isLatestVersion && r.accepted_at ? new Date(r.accepted_at).getTime() : null;
-            const liveCompletedTs = isLatestVersion && r.referral_status_changed_at && ["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() || "")
+            const liveAcceptedTs = (isLatestVersion || isOriginal) && r.accepted_at ? new Date(r.accepted_at).getTime() : null;
+            const liveCompletedTs = (isLatestVersion || isOriginal) && r.referral_status_changed_at && ["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() || "")
               ? new Date(r.referral_status_changed_at).getTime()
               : null;
 
-            const acceptedTs = acceptedEvent ? new Date(acceptedEvent.timestamp).getTime()
-              : (liveAcceptedTs !== null && liveAcceptedTs >= cycleStartTs ? liveAcceptedTs : null);
-            const finalTs = finalEvent ? new Date(finalEvent.timestamp).getTime()
-              : (liveCompletedTs !== null && liveCompletedTs >= cycleStartTs ? liveCompletedTs : null);
+            // For original version: use original acceptance date regardless of cycle bounds
+            const acceptedTs = isOriginal
+              ? (liveAcceptedTs ?? (acceptedEvent ? new Date(acceptedEvent.timestamp).getTime() : null))
+              : (acceptedEvent ? new Date(acceptedEvent.timestamp).getTime()
+                : (liveAcceptedTs !== null && liveAcceptedTs >= cycleStartTs ? liveAcceptedTs : null));
+            const finalTs = isOriginal
+              ? (liveCompletedTs ?? (finalEvent ? new Date(finalEvent.timestamp).getTime() : null))
+              : (finalEvent ? new Date(finalEvent.timestamp).getTime()
+                : (liveCompletedTs !== null && liveCompletedTs >= cycleStartTs ? liveCompletedTs : null));
 
-            const cycleLabel = isRerefer ? "Rereferral Cycle" : "Referral Timeline";
-            const cycleStartLabel = isRerefer ? "Sent Back to System" : "Referral Start";
+            const cycleLabel = "Referral Timeline";
+            const cycleStartLabel = (isRerefer && !isOriginal) ? "Sent Back to System" : "Referral Start";
 
             const rows: { label: string; value: string }[] = [];
 
@@ -543,11 +648,22 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
               });
               rows.push({ label: "Status", value: "Awaiting send-back to system" });
             } else {
+              // ── Always show the cycle start + running "Days in System"
+              // counter. These NEVER restart once the referral is accepted —
+              // they stay anchored to the original referral start (or, for
+              // rereferral cycles, the send-back timestamp) and keep
+              // accumulating through acceptance and completion.
               rows.push({
                 label: cycleStartLabel,
                 value: new Date(cycleStartTs).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }),
               });
+              rows.push({
+                label: "Days in System",
+                value: fmtDays(msToDays(cycleEndTs - cycleStartTs)),
+              });
 
+              // ── Additional acceptance / final-status metrics shown only
+              // when the corresponding event has occurred.
               if (finalTs !== null && acceptedTs !== null) {
                 const finalLabel = (finalEvent?.status || r.referral_status?.toLowerCase() || "completed");
                 const labelMap: Record<string, string> = { completed: "Days to Completion", deferred: "Days to Deferral", blacklisted: "Days to Blacklist" };
@@ -556,8 +672,6 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
               } else if (acceptedTs !== null) {
                 rows.push({ label: "Days to Acceptance", value: fmtDays(msToDays(acceptedTs - cycleStartTs)) });
                 rows.push({ label: "Days Since Acceptance", value: fmtDays(msToDays(cycleEndTs - acceptedTs)) });
-              } else {
-                rows.push({ label: isLatestVersion ? "Days in System" : "Days in Cycle", value: fmtDays(msToDays(cycleEndTs - cycleStartTs)) });
               }
             }
 
@@ -596,33 +710,73 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
             </div>
           )}
 
-          {/* Referral Info — Original or Edited */}
-          {isOriginal ? (
-            <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 border border-blue-200">
-              <h3 className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5">Created By</h3>
-              {creatorName ? (
-                <UserProfilePopover userId={referral.user_id} displayName={creatorName} />
-              ) : (
-                <p className="text-xs text-gray-800 font-medium">—</p>
-              )}
-              <p className="text-[11px] text-gray-500 mt-0.5">{formatDateTime(referral.created_at)}</p>
-            </div>
-          ) : (
-            <div className="bg-purple-50 rounded-lg p-2.5 sm:p-3 border border-purple-200">
-              <h3 className="text-[10px] font-bold text-purple-700 uppercase tracking-wide mb-1.5">Last Edited By</h3>
-              {editorId && editorName ? (
-                <UserProfilePopover userId={editorId} displayName={editorName} />
-              ) : (
-                <p className="text-xs text-gray-800 font-medium">—</p>
-              )}
-              <p className="text-[11px] text-gray-500 mt-0.5">
-                {currentVersion ? formatDateTime(currentVersion.timestamp) : lastEditedAt ? formatDateTime(lastEditedAt) : "—"}
-              </p>
-            </div>
-          )}
+          {/* Referral Info — Created By (always shown) + Sent Back By (rereferral cycles) */}
+          {(() => {
+            // Find the SEND_BACK_TO_SYSTEM event for the current non-original cycle
+            const cycleVersionTs = currentVersion ? new Date(currentVersion.timestamp).getTime() : null;
+            const nextVersionTs = currentIndex < total - 1
+              ? new Date(versions[currentIndex + 1].timestamp).getTime()
+              : Number.POSITIVE_INFINITY;
+            const sendBackEvent = !isOriginal
+              ? rereferralHistory
+                  .filter(e =>
+                    e.action === "SEND_BACK_TO_SYSTEM" &&
+                    cycleVersionTs !== null &&
+                    new Date(e.timestamp).getTime() >= cycleVersionTs - 1000 &&
+                    new Date(e.timestamp).getTime() <= nextVersionTs
+                  )
+                  .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0] ?? null
+              : null;
+            const sendBackUserId = sendBackEvent?.userId ?? null;
+            const sendBackName = sendBackUserId ? (rereferralUsers[sendBackUserId] ?? null) : null;
+            const sendBackTs = sendBackEvent?.timestamp ?? null;
 
-          {/* Status History */}
-          {statusHistory.length > 0 && (
+            // Determine if this is a plain edit (not a rereferral cycle)
+            const isPlainEdit = !isOriginal && !sendBackEvent &&
+              (currentVersion?.action === "UPDATE_REFERRAL" || currentVersion?.action === "EDIT_REQUEST");
+
+            return (
+              <>
+                {/* Show original creator only on the original version */}
+                {isOriginal && (
+                  <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 border border-blue-200">
+                    <h3 className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5">Created By</h3>
+                    {creatorName ? (
+                      <UserProfilePopover userId={originalCreatorId || referral.user_id} displayName={creatorName} />
+                    ) : (
+                      <p className="text-xs text-gray-800 font-medium">—</p>
+                    )}
+                    <p className="text-[11px] text-gray-500 mt-0.5">{formatDateTime(originalCreatedAt || referral.created_at)}</p>
+                  </div>
+                )}
+
+                {/* Show "Sent Back By" for rereferral cycles */}
+                {!isOriginal && sendBackUserId && sendBackName && (
+                  <div className="bg-purple-50 rounded-lg p-2.5 sm:p-3 border border-purple-200">
+                    <h3 className="text-[10px] font-bold text-purple-700 uppercase tracking-wide mb-1.5">Sent Back By</h3>
+                    <UserProfilePopover userId={sendBackUserId} displayName={sendBackName} />
+                    {sendBackTs && (
+                      <p className="text-[11px] text-gray-500 mt-0.5">{formatDateTime(sendBackTs)}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Show "Last Edited By" for plain edits only */}
+                {isPlainEdit && editorId && editorName && (
+                  <div className="bg-purple-50 rounded-lg p-2.5 sm:p-3 border border-purple-200">
+                    <h3 className="text-[10px] font-bold text-purple-700 uppercase tracking-wide mb-1.5">Last Edited By</h3>
+                    <UserProfilePopover userId={editorId} displayName={editorName} />
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      {currentVersion ? formatDateTime(currentVersion.timestamp) : lastEditedAt ? formatDateTime(lastEditedAt) : "—"}
+                    </p>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+
+          {/* Status History — only when a final status (completed/deferred/blacklisted) exists */}
+          {statusHistory.some(s => ["completed", "deferred", "blacklisted"].includes(s.status)) && (
             <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 border border-gray-200">
               <h3 className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-2">Status History</h3>
               <div className="space-y-2">
@@ -643,11 +797,24 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
                         {change.status}
                       </p>
                       <div className={`text-[10px] ${change.status === "blacklisted" ? "text-gray-300" : "text-gray-500"}`}>
-                        <span>by </span>
-                        {change.changedBy && statusChangers[change.changedBy] ? (
-                          <UserProfilePopover userId={change.changedBy} displayName={statusChangers[change.changedBy]} />
+                        {["completed", "deferred", "blacklisted"].includes(change.status) ? (
+                          <>
+                            <span>Approved by: </span>
+                            {change.changedBy && statusChangers[change.changedBy] ? (
+                              <UserProfilePopover userId={change.changedBy} displayName={statusChangers[change.changedBy]} />
+                            ) : (
+                              <span>Unknown</span>
+                            )}
+                          </>
                         ) : (
-                          <span>Unknown</span>
+                          <>
+                            <span>by </span>
+                            {change.changedBy && statusChangers[change.changedBy] ? (
+                              <UserProfilePopover userId={change.changedBy} displayName={statusChangers[change.changedBy]} />
+                            ) : (
+                              <span>Unknown</span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
