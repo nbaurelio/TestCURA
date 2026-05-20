@@ -1,11 +1,17 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
-import { X, ChevronDown, Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { MedicalAlertTagInput } from "@/components/ui/MedicalAlertTagInput";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { createReferral, ReferralFormData } from "@/lib/api/referrals";
 import { filterTaxonomy } from "@/lib/data/filterTaxonomy";
 import { supabase } from "@/lib/supabase";
@@ -20,6 +26,7 @@ const emptyForm = (): ReferralFormData => ({
   chart_number: "",
   treatment: "",
   age: undefined,
+  sex: "",
   medical_alert: "",
   clinical_section_origin: "",
   clinical_discipline_origin: "",
@@ -27,6 +34,7 @@ const emptyForm = (): ReferralFormData => ({
   clinical_section_destination: "",
   clinical_discipline_destination: "",
   treatment_service_destination: "",
+  special_case: "",
   medical_history: "",
   tentative_appointment_schedule: "",
   notes_and_special_indications: "",
@@ -40,8 +48,9 @@ export function ExistingPatientReferralModal({
   const [formData, setFormData] = useState<ReferralFormData>(emptyForm());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
-  const [lookupStatus, setLookupStatus] = useState<"idle" | "found" | "not_found">("idle");
+  const [lookupStatus, setLookupStatus] = useState<"idle" | "found" | "not_found" | "blacklisted">("idle");
 
   // Origin cascading filter state
   const [originSection, setOriginSection] = useState("");
@@ -63,8 +72,11 @@ export function ExistingPatientReferralModal({
       setDestSection(""); setDestDiscipline(""); setDestTreatment("");
       setLookupStatus("idle");
       setError(null);
+      setSubmitted(false);
     }
   }, [open]);
+
+  const isBlacklisted = lookupStatus === "blacklisted";
 
   const handleChange = (field: keyof ReferralFormData, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -83,22 +95,29 @@ export function ExistingPatientReferralModal({
       try {
         const referralsTable = supabase.from("referrals") as any;
         const { data, error: lookupError } = await referralsTable
-          .select("treatment, age, medical_alert, medical_history, notes_and_special_indications")
+          .select("treatment, age, sex, medical_alert, medical_history, notes_and_special_indications, referral_status")
           .eq("chart_number", value.trim())
-          .maybeSingle();
+          .order("created_at", { ascending: false });
 
         if (lookupError) throw lookupError;
 
-        if (data) {
-          setFormData(prev => ({
-            ...prev,
-            treatment: data.treatment ?? "",
-            age: data.age ?? undefined,
-            medical_alert: data.medical_alert ?? "",
-            medical_history: data.medical_history ?? "",
-            notes_and_special_indications: data.notes_and_special_indications ?? "",
-          }));
-          setLookupStatus("found");
+        if (data && data.length > 0) {
+          const isChartBlacklisted = data.some((r: any) => r.referral_status?.toLowerCase() === "blacklisted");
+          if (isChartBlacklisted) {
+            setLookupStatus("blacklisted");
+          } else {
+            const latest = data[0];
+            setFormData(prev => ({
+              ...prev,
+              treatment: latest.treatment ?? "",
+              age: latest.age ?? undefined,
+              sex: latest.sex ?? "",
+              medical_alert: latest.medical_alert ?? "",
+              medical_history: latest.medical_history ?? "",
+              notes_and_special_indications: latest.notes_and_special_indications ?? "",
+            }));
+            setLookupStatus("found");
+          }
         } else {
           setLookupStatus("not_found");
         }
@@ -114,15 +133,28 @@ export function ExistingPatientReferralModal({
   // Origin filter handlers
   const handleOriginSectionChange = (sectionId: string) => {
     setOriginSection(sectionId);
-    setOriginDiscipline("");
     setOriginTreatment("");
     const section = filterTaxonomy.find(s => s.id === sectionId);
-    setFormData(prev => ({
-      ...prev,
-      clinical_section_origin: section?.shortName || "",
-      clinical_discipline_origin: "",
-      treatment_service_origin: ""
-    }));
+    
+    // For Prosthodontics, auto-select the single discipline
+    if (sectionId === "prostho" && section?.clinicalDisciplines.length === 1) {
+      const discipline = section.clinicalDisciplines[0];
+      setOriginDiscipline(discipline.id);
+      setFormData(prev => ({
+        ...prev,
+        clinical_section_origin: section?.shortName || "",
+        clinical_discipline_origin: discipline.name,
+        treatment_service_origin: ""
+      }));
+    } else {
+      setOriginDiscipline("");
+      setFormData(prev => ({
+        ...prev,
+        clinical_section_origin: section?.shortName || "",
+        clinical_discipline_origin: "",
+        treatment_service_origin: ""
+      }));
+    }
   };
 
   const handleOriginDisciplineChange = (disciplineId: string) => {
@@ -151,15 +183,28 @@ export function ExistingPatientReferralModal({
   // Destination filter handlers
   const handleDestSectionChange = (sectionId: string) => {
     setDestSection(sectionId);
-    setDestDiscipline("");
     setDestTreatment("");
     const section = filterTaxonomy.find(s => s.id === sectionId);
-    setFormData(prev => ({
-      ...prev,
-      clinical_section_destination: section?.shortName || "",
-      clinical_discipline_destination: "",
-      treatment_service_destination: ""
-    }));
+    
+    // For Prosthodontics, auto-select the single discipline
+    if (sectionId === "prostho" && section?.clinicalDisciplines.length === 1) {
+      const discipline = section.clinicalDisciplines[0];
+      setDestDiscipline(discipline.id);
+      setFormData(prev => ({
+        ...prev,
+        clinical_section_destination: section?.shortName || "",
+        clinical_discipline_destination: discipline.name,
+        treatment_service_destination: ""
+      }));
+    } else {
+      setDestDiscipline("");
+      setFormData(prev => ({
+        ...prev,
+        clinical_section_destination: section?.shortName || "",
+        clinical_discipline_destination: "",
+        treatment_service_destination: ""
+      }));
+    }
   };
 
   const handleDestDisciplineChange = (disciplineId: string) => {
@@ -181,7 +226,8 @@ export function ExistingPatientReferralModal({
     const treatment = discipline?.treatmentServices.find(t => t.id === treatmentId);
     setFormData(prev => ({
       ...prev,
-      treatment_service_destination: treatment?.name || ""
+      treatment_service_destination: treatment?.name || "",
+      special_case: treatment?.name === "Special Case" ? prev.special_case : "",
     }));
   };
 
@@ -212,16 +258,45 @@ export function ExistingPatientReferralModal({
     return discipline?.treatmentServices || [];
   };
 
+  const getValidationErrors = () => {
+    const errs: Record<string, string> = {};
+    if (!formData.chart_number.trim()) errs.chart_number = "Chart number is required.";
+    if (!formData.age) errs.age = "Age is required.";
+    if (!formData.sex) errs.sex = "Sex is required.";
+    if (!formData.clinical_section_origin) errs.origin_section = "Clinical section is required.";
+    if (originSection !== "prostho" && !formData.clinical_discipline_origin) errs.origin_discipline = "Clinical discipline is required.";
+    if (!formData.clinical_section_destination) errs.dest_section = "Clinical section is required.";
+    if (destSection !== "prostho" && !formData.clinical_discipline_destination) errs.dest_discipline = "Clinical discipline is required.";
+    if (!formData.treatment_service_destination) errs.dest_treatment = "Treatment service is required.";
+    if (formData.treatment_service_destination === "Special Case" && !formData.special_case?.trim()) errs.special_case = "Special case description is required.";
+    return errs;
+  };
+
   const handleSave = async () => {
-    if (!formData.chart_number.trim()) {
-      setError("Please enter a chart number.");
+    setSubmitted(true);
+    if (isBlacklisted) {
+      setError("This chart number is blacklisted. A new referral cannot be created.");
+      return;
+    }
+    const errs = getValidationErrors();
+    if (Object.keys(errs).length > 0) {
+      setError("Please fill in all required fields.");
       return;
     }
     setLoading(true);
     setError(null);
 
     try {
-      await createReferral(formData, true);
+      const saveData = { ...formData };
+      if (saveData.tentative_appointment_schedule) {
+        const d = new Date(saveData.tentative_appointment_schedule);
+        const tzOffset = -d.getTimezoneOffset();
+        const sign = tzOffset >= 0 ? '+' : '-';
+        const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
+        const localISO = `${saveData.tentative_appointment_schedule.substring(0, 16)}:00${sign}${pad(tzOffset / 60)}:${pad(tzOffset % 60)}`;
+        saveData.tentative_appointment_schedule = localISO;
+      }
+      await createReferral(saveData, true);
       onSave?.();
       onOpenChange(false);
     } catch (err) {
@@ -235,308 +310,306 @@ export function ExistingPatientReferralModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#f5f0e1] max-w-[420px] w-[95vw] max-h-[90vh] p-0 gap-0 rounded-lg overflow-hidden border-2 border-primary [&>button]:hidden">
-        {/* Header */}
-        <div className="bg-secondary p-3 flex items-center justify-between">
-          <h2 className="text-white font-bold text-sm">CREATE REFERRAL</h2>
+      <DialogContent className="bg-white max-w-[420px] w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl max-h-[85vh] overflow-y-auto [&>button:last-child]:hidden">
+        <DialogHeader className="bg-secondary p-3 sm:p-4 sticky top-0 z-10 flex flex-row items-start justify-between">
+          <div>
+            <DialogTitle className="text-white font-bold text-xs sm:text-sm uppercase tracking-wide">
+              Existing Patient Referral
+            </DialogTitle>
+            <p className="text-white/70 text-[10px] mt-0.5">Enter chart number to auto-fill patient details</p>
+          </div>
           <button
             onClick={() => onOpenChange(false)}
-            className="w-6 h-6 border-2 border-white rounded flex items-center justify-center hover:bg-white/10"
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors mt-0.5"
           >
-            <X className="h-3 w-3 text-white" />
+            <X className="h-3.5 w-3.5 text-white" />
           </button>
-        </div>
+        </DialogHeader>
 
-        {/* Form */}
-        <div className="p-4 space-y-3 max-h-[calc(90vh-120px)] overflow-y-auto">
+        <div className="p-3 sm:p-4 space-y-2.5 sm:space-y-3">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-xs">
+            <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs">
               {error}
             </div>
           )}
 
-          {/* Chart Number with lookup indicator */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-            <label className="text-xs text-gray-700">Chart Number</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={formData.chart_number}
-                onChange={(e) => handleChartNumberChange(e.target.value)}
-                placeholder="e.g. 2026-00001"
-                className={`h-7 w-full px-2 pr-7 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-primary ${
-                  lookupStatus === "found"
-                    ? "border-green-400 bg-green-50"
-                    : lookupStatus === "not_found"
-                    ? "border-red-400"
-                    : "border-gray-300"
-                }`}
-              />
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs">
-                {lookupLoading ? (
-                  <span className="text-gray-400 animate-pulse">…</span>
-                ) : lookupStatus === "found" ? (
-                  <span className="text-green-500">✓</span>
-                ) : lookupStatus === "not_found" ? (
-                  <span className="text-red-400">✗</span>
-                ) : (
-                  <Search className="h-3 w-3 text-gray-400" />
-                )}
-              </span>
-            </div>
-          </div>
+          {/* Patient Info */}
+          <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 space-y-2">
+            <label className="text-[10px] font-bold text-secondary uppercase tracking-wide block">Patient Info</label>
 
-          {lookupStatus === "not_found" && (
-            <p className="text-xs text-red-500 -mt-1 ml-[148px] sm:ml-[188px]">Chart number not found.</p>
-          )}
-          {lookupStatus === "found" && (
-            <p className="text-xs text-green-600 -mt-1 ml-[148px] sm:ml-[188px]">Patient details loaded.</p>
-          )}
-
-          {/* Treatment (auto-filled, still editable) */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-            <label className="text-xs text-gray-700">Treatment</label>
-            <input
-              type="text"
-              value={formData.treatment}
-              onChange={(e) => handleChange("treatment", e.target.value)}
-              readOnly={lookupStatus !== "found"}
-              className={`h-7 px-2 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary ${
-                lookupStatus === "found" ? "bg-white" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            />
-          </div>
-
-          {/* Age (auto-filled, still editable) */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-            <label className="text-xs text-gray-700">Age</label>
-            <input
-              type="number"
-              min="1"
-              max="99"
-              placeholder="1-99"
-              value={formData.age || ""}
-              onChange={(e) => handleChange("age", parseInt(e.target.value) || 0)}
-              readOnly={lookupStatus !== "found"}
-              className={`h-7 px-2 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary ${
-                lookupStatus === "found" ? "bg-white" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            />
-          </div>
-
-          {/* Medical Alert (auto-filled, still editable) */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-            <label className="text-xs text-gray-700">Medical Alert</label>
-            <input
-              type="text"
-              value={formData.medical_alert}
-              onChange={(e) => handleChange("medical_alert", e.target.value)}
-              readOnly={lookupStatus !== "found"}
-              className={`h-7 px-2 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary ${
-                lookupStatus === "found" ? "bg-white" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            />
-          </div>
-
-          {/* Clinical Section of Origin - Cascading Filters */}
-          <div className="space-y-2">
-            <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-              <label className="text-xs text-gray-700">Clinical Section of Origin</label>
+            {/* Chart Number with lookup */}
+            {(() => {
+              const errs = submitted ? getValidationErrors() : {};
+              return (
+            <div>
+              <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Chart Number <span className="text-red-500">*</span></label>
               <div className="relative">
+                <Input
+                  className={`h-8 text-xs pr-7 ${
+                    lookupStatus === "found"
+                      ? "border-green-400 bg-green-50 focus:ring-green-500"
+                      : lookupStatus === "not_found"
+                      ? "border-red-400 focus:ring-red-500"
+                      : lookupStatus === "blacklisted"
+                      ? "border-gray-600 bg-gray-100 focus:ring-gray-500"
+                      : "border-gray-300 focus:ring-secondary"
+                  }`}
+                  value={formData.chart_number}
+                  onChange={(e) => handleChartNumberChange(e.target.value)}
+                  placeholder="e.g. 2026-00001"
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs">
+                  {lookupLoading ? (
+                    <span className="text-gray-400 animate-pulse">…</span>
+                  ) : lookupStatus === "found" ? (
+                    <span className="text-green-500 font-bold">✓</span>
+                  ) : lookupStatus === "not_found" ? (
+                    <span className="text-red-400 font-bold">✗</span>
+                  ) : lookupStatus === "blacklisted" ? (
+                    <span className="text-gray-700 font-bold">⊘</span>
+                  ) : (
+                    <Search className="h-3 w-3 text-gray-400" />
+                  )}
+                </span>
+              </div>
+              {lookupStatus === "not_found" && <p className="text-[10px] text-red-500 mt-1">Chart number not found.</p>}
+              {lookupStatus === "found" && <p className="text-[10px] text-green-600 mt-1">Patient details loaded.</p>}
+              {lookupStatus === "blacklisted" && (
+                <div className="flex items-center gap-1.5 mt-1.5 bg-gray-800 text-white px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wide">
+                  <span>⊘</span>
+                  <span>This chart number is blacklisted — referral cannot be created</span>
+                </div>
+              )}
+              {errs.chart_number && !lookupStatus.match(/found|not_found|blacklisted/) && <p className="text-[10px] text-red-500 mt-0.5">{errs.chart_number}</p>}
+            </div>
+              );
+            })()}
+
+            {(() => {
+              const errs = submitted ? getValidationErrors() : {};
+              return (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Age <span className="text-red-500">*</span></label>
+                <Input
+                  className={`h-8 text-xs ${errs.age && lookupStatus === "found" ? "border-red-400 focus:ring-red-400" : lookupStatus === "found" ? "border-gray-300 focus:ring-secondary" : "border-gray-300 bg-gray-100 cursor-not-allowed"}`}
+                  type="number"
+                  min="1"
+                  max="99"
+                  placeholder="1-99"
+                  value={formData.age || ""}
+                  onChange={(e) => handleChange("age", parseInt(e.target.value) || 0)}
+                  readOnly={lookupStatus !== "found"}
+                />
+                {errs.age && lookupStatus === "found" && <p className="text-[10px] text-red-500 mt-0.5">{errs.age}</p>}
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Sex <span className="text-red-500">*</span></label>
                 <select
-                  value={originSection}
-                  onChange={(e) => handleOriginSectionChange(e.target.value)}
-                  className="h-7 w-full px-2 pr-8 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
+                  className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${errs.sex && lookupStatus === "found" ? "border-red-400 focus:ring-red-400" : lookupStatus !== "found" ? "border-gray-300 bg-gray-100 cursor-not-allowed" : "border-gray-300 focus:ring-secondary"}`}
+                  value={formData.sex || ""}
+                  onChange={(e) => handleChange("sex", e.target.value)}
+                  disabled={lookupStatus !== "found"}
                 >
-                  <option value="">Select Clinical Section</option>
-                  {filterTaxonomy.map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {section.name} ({section.shortName})
-                    </option>
-                  ))}
+                  <option value="">Select Sex</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
                 </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-500 pointer-events-none" />
+                {errs.sex && lookupStatus === "found" && <p className="text-[10px] text-red-500 mt-0.5">{errs.sex}</p>}
               </div>
             </div>
+              );
+            })()}
+          </div>
 
-            <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-              <label className="text-xs text-gray-700">Clinical Discipline</label>
-              <div className="relative">
+          {/* Medical Alert */}
+          <div className="bg-red-50 rounded-lg p-2.5 sm:p-3 border border-red-200">
+            <label className="text-[10px] font-bold text-red-700 uppercase tracking-wide mb-1.5 block">Medical Alert</label>
+            <MedicalAlertTagInput
+              value={formData.medical_alert ?? ""}
+              onChange={(val) => handleChange("medical_alert", val)}
+              disabled={lookupStatus !== "found"}
+              placeholder={lookupStatus !== "found" ? "Auto-filled from chart" : "Type an alert and press Enter..."}
+            />
+          </div>
+
+          {/* Clinical Pathway - Origin */}
+          {(() => {
+            const errs = submitted ? getValidationErrors() : {};
+            return (
+          <div className={`bg-blue-50 rounded-lg p-2.5 sm:p-3 border space-y-2 ${(errs.origin_section || errs.origin_discipline) ? "border-red-300" : "border-blue-200"}`}>
+            <label className="text-[10px] font-bold text-blue-700 uppercase tracking-wide block">Clinical Pathway — Origin</label>
+            <div>
+              <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Clinical Section <span className="text-red-500">*</span></label>
+              <select
+                value={originSection}
+                onChange={(e) => handleOriginSectionChange(e.target.value)}
+                className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${errs.origin_section ? "border-red-400 focus:ring-red-400" : "border-blue-300 focus:ring-blue-500"}`}
+              >
+                <option value="">Select Clinical Section</option>
+                {filterTaxonomy.map((section) => (
+                  <option key={section.id} value={section.id}>{section.name} ({section.shortName})</option>
+                ))}
+              </select>
+              {errs.origin_section && <p className="text-[10px] text-red-500 mt-0.5">{errs.origin_section}</p>}
+            </div>
+            {originSection !== "prostho" && (
+              <div>
+                <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Clinical Discipline <span className="text-red-500">*</span></label>
                 <select
                   value={originDiscipline}
                   onChange={(e) => handleOriginDisciplineChange(e.target.value)}
                   disabled={!originSection}
-                  className={`h-7 w-full px-2 pr-8 text-xs border rounded appearance-none ${
-                    originSection
-                      ? "bg-white border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary"
-                      : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
-                  }`}
-                  title={!originSection ? "Please select Clinical Section first" : ""}
+                  className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed ${errs.origin_discipline ? "border-red-400 focus:ring-red-400" : "border-blue-300 focus:ring-blue-500"}`}
                 >
                   <option value="">Select Clinical Discipline</option>
                   {getOriginDisciplines().map((discipline) => (
-                    <option key={discipline.id} value={discipline.id}>
-                      {discipline.name}
-                    </option>
+                    <option key={discipline.id} value={discipline.id}>{discipline.name}</option>
                   ))}
                 </select>
-                <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none ${originSection ? "text-gray-500" : "text-gray-400"}`} />
+                {errs.origin_discipline && <p className="text-[10px] text-red-500 mt-0.5">{errs.origin_discipline}</p>}
               </div>
-            </div>
-
-            <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-              <label className="text-xs text-gray-700">Treatment Service</label>
-              <div className="relative">
-                <select
-                  value={originTreatment}
-                  onChange={(e) => handleOriginTreatmentChange(e.target.value)}
-                  disabled={!originSection || !originDiscipline}
-                  className={`h-7 w-full px-2 pr-8 text-xs border rounded appearance-none ${
-                    originSection && originDiscipline
-                      ? "bg-white border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary"
-                      : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
-                  }`}
-                  title={!originSection || !originDiscipline ? "Please select Clinical Section and Clinical Discipline first" : ""}
-                >
-                  <option value="">Select Treatment Service</option>
-                  {getOriginTreatments().map((treatment) => (
-                    <option key={treatment.id} value={treatment.id}>
-                      {treatment.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none ${originSection && originDiscipline ? "text-gray-500" : "text-gray-400"}`} />
-              </div>
-            </div>
+            )}
           </div>
+            );
+          })()}
 
-          {/* Clinical Section of Destination - Cascading Filters */}
-          <div className="space-y-2">
-            <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-              <label className="text-xs text-gray-700">Clinical Section of Destination</label>
-              <div className="relative">
-                <select
-                  value={destSection}
-                  onChange={(e) => handleDestSectionChange(e.target.value)}
-                  className="h-7 w-full px-2 pr-8 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
-                >
-                  <option value="">Select Clinical Section</option>
-                  {filterTaxonomy.map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {section.name} ({section.shortName})
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-500 pointer-events-none" />
-              </div>
+          {/* Clinical Pathway - Destination */}
+          {(() => {
+            const errs = submitted ? getValidationErrors() : {};
+            return (
+          <div className={`bg-green-50 rounded-lg p-2.5 sm:p-3 border space-y-2 ${(errs.dest_section || errs.dest_discipline || errs.dest_treatment) ? "border-red-300" : "border-green-200"}`}>
+            <label className="text-[10px] font-bold text-green-700 uppercase tracking-wide block">Clinical Pathway — Destination</label>
+            <div>
+              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Clinical Section <span className="text-red-500">*</span></label>
+              <select
+                value={destSection}
+                onChange={(e) => handleDestSectionChange(e.target.value)}
+                className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${errs.dest_section ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
+              >
+                <option value="">Select Clinical Section</option>
+                {filterTaxonomy.map((section) => (
+                  <option key={section.id} value={section.id}>{section.name} ({section.shortName})</option>
+                ))}
+              </select>
+              {errs.dest_section && <p className="text-[10px] text-red-500 mt-0.5">{errs.dest_section}</p>}
             </div>
-
-            <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-              <label className="text-xs text-gray-700">Clinical Discipline</label>
-              <div className="relative">
+            {destSection !== "prostho" && (
+              <div>
+                <label className="text-[10px] font-semibold text-green-500 mb-1 block">Clinical Discipline <span className="text-red-500">*</span></label>
                 <select
                   value={destDiscipline}
                   onChange={(e) => handleDestDisciplineChange(e.target.value)}
                   disabled={!destSection}
-                  className={`h-7 w-full px-2 pr-8 text-xs border rounded appearance-none ${
-                    destSection
-                      ? "bg-white border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary"
-                      : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
-                  }`}
-                  title={!destSection ? "Please select Clinical Section first" : ""}
+                  className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed ${errs.dest_discipline ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
                 >
                   <option value="">Select Clinical Discipline</option>
                   {getDestDisciplines().map((discipline) => (
-                    <option key={discipline.id} value={discipline.id}>
-                      {discipline.name}
-                    </option>
+                    <option key={discipline.id} value={discipline.id}>{discipline.name}</option>
                   ))}
                 </select>
-                <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none ${destSection ? "text-gray-500" : "text-gray-400"}`} />
+                {errs.dest_discipline && <p className="text-[10px] text-red-500 mt-0.5">{errs.dest_discipline}</p>}
               </div>
+            )}
+            <div>
+              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Treatment Service <span className="text-red-500">*</span></label>
+              <select
+                value={destTreatment}
+                onChange={(e) => handleDestTreatmentChange(e.target.value)}
+                disabled={!destSection || (!destDiscipline && destSection !== "prostho")}
+                className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed ${errs.dest_treatment ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
+              >
+                <option value="">Select Treatment Service</option>
+                {getDestTreatments().map((treatment) => (
+                  <option key={treatment.id} value={treatment.id}>{treatment.name}</option>
+                ))}
+              </select>
+              {errs.dest_treatment && <p className="text-[10px] text-red-500 mt-0.5">{errs.dest_treatment}</p>}
             </div>
+            {formData.treatment_service_destination === "Special Case" && (
+            <div>
+              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Special Case <span className="text-red-500">*</span></label>
+              <Input
+                className={`h-8 text-xs ${errs.special_case ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
+                value={formData.special_case}
+                onChange={(e) => handleChange("special_case", e.target.value)}
+                placeholder="Enter special case if applicable"
+              />
+              {errs.special_case && <p className="text-[10px] text-red-500 mt-0.5">{errs.special_case}</p>}
+            </div>
+            )}
+          </div>
+            );
+          })()}
 
-            <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-              <label className="text-xs text-gray-700">Treatment Service</label>
-              <div className="relative">
-                <select
-                  value={destTreatment}
-                  onChange={(e) => handleDestTreatmentChange(e.target.value)}
-                  disabled={!destSection || !destDiscipline}
-                  className={`h-7 w-full px-2 pr-8 text-xs border rounded appearance-none ${
-                    destSection && destDiscipline
-                      ? "bg-white border-gray-300 focus:outline-none focus:ring-1 focus:ring-primary"
-                      : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
-                  }`}
-                  title={!destSection || !destDiscipline ? "Please select Clinical Section and Clinical Discipline first" : ""}
-                >
-                  <option value="">Select Treatment Service</option>
-                  {getDestTreatments().map((treatment) => (
-                    <option key={treatment.id} value={treatment.id}>
-                      {treatment.name}
+          {/* Appointment */}
+          <div>
+            <label className="text-[10px] font-bold text-secondary uppercase tracking-wide mb-1.5 block">Tentative Appointment</label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                className="w-full sm:flex-1 h-9 text-xs border-2 border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary font-medium"
+                type="date"
+                value={formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[0] : ''}
+                onChange={(e) => {
+                  const date = e.target.value;
+                  const time = formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[1] : '06:00';
+                  handleChange("tentative_appointment_schedule", `${date}T${time}`);
+                }}
+              />
+              <select
+                className="w-28 h-9 text-xs border-2 border-secondary rounded-md px-3 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-secondary bg-secondary font-bold text-white cursor-pointer hover:bg-secondary/90 transition-colors [&>option]:bg-white [&>option]:text-gray-700 [&>option]:font-semibold"
+                value={formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[1]?.substring(0, 5) : '06:00'}
+                onChange={(e) => {
+                  const date = formData.tentative_appointment_schedule ? formData.tentative_appointment_schedule.split('T')[0] : new Date().toISOString().split('T')[0];
+                  handleChange("tentative_appointment_schedule", `${date}T${e.target.value}`);
+                }}
+              >
+                {Array.from({ length: 25 }, (_, i) => {
+                  const hour = Math.floor(i / 2) + 6;
+                  const minute = i % 2 === 0 ? '00' : '30';
+                  const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+                  const period = hour >= 12 ? 'pm' : 'am';
+                  const value = `${String(hour).padStart(2, '0')}:${minute}`;
+                  return (
+                    <option key={value} value={value}>
+                      {displayHour}:{minute}{period}
                     </option>
-                  ))}
-                </select>
-                <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none ${destSection && destDiscipline ? "text-gray-500" : "text-gray-400"}`} />
-              </div>
+                  );
+                })}
+              </select>
             </div>
           </div>
 
-          {/* Medical History (auto-filled, still editable) */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-start gap-2">
-            <label className="text-xs text-gray-700 pt-1">Medical History</label>
-            <textarea
-              rows={3}
-              value={formData.medical_history}
-              onChange={(e) => handleChange("medical_history", e.target.value)}
-              readOnly={lookupStatus !== "found"}
-              className={`px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary resize-none ${
-                lookupStatus === "found" ? "bg-white" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
+          {/* Notes */}
+          <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 border border-yellow-200">
+            <label className="text-[10px] font-bold text-yellow-700 uppercase tracking-wide mb-1.5 block">Notes & Special Indications</label>
+            <RichTextEditor
+              value={formData.notes_and_special_indications || ""}
+              onChange={(val) => handleChange("notes_and_special_indications", val)}
+              disabled={lookupStatus !== "found"}
+              placeholder="Auto-filled from chart"
             />
           </div>
 
-          {/* Tentative Appointment Schedule (always blank - user must fill) */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-center gap-2">
-            <label className="text-xs text-gray-700">Tentative Appointment Schedule</label>
-            <input
-              type="datetime-local"
-              value={formData.tentative_appointment_schedule}
-              onChange={(e) => handleChange("tentative_appointment_schedule", e.target.value)}
-              className="h-7 w-full px-2 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-primary"
-            />
+          {/* Action Buttons */}
+          <div className="flex flex-row gap-2 pt-1.5 w-full">
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={loading || isBlacklisted}
+              className="flex-1 bg-secondary hover:bg-secondary/90 text-white text-[10px] font-bold uppercase h-8 disabled:opacity-50"
+            >
+              {loading ? "SAVING..." : "SAVE"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="flex-1 text-[10px] font-bold h-8"
+            >
+              CANCEL
+            </Button>
           </div>
-
-          {/* Notes and Special Indications (auto-filled, still editable) */}
-          <div className="grid grid-cols-[140px_1fr] sm:grid-cols-[180px_1fr] items-start gap-2">
-            <label className="text-xs text-gray-700 pt-1">Notes and Special Indications</label>
-            <textarea
-              rows={3}
-              value={formData.notes_and_special_indications}
-              onChange={(e) => handleChange("notes_and_special_indications", e.target.value)}
-              readOnly={lookupStatus !== "found"}
-              className={`px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary resize-none ${
-                lookupStatus === "found" ? "bg-white" : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 pt-0 flex justify-end gap-3 sticky bottom-0 bg-[#f5f0e1] border-t border-gray-300">
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="px-6 py-1.5 bg-secondary text-white text-xs font-semibold rounded hover:bg-secondary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? "SAVING..." : "SAVE"}
-          </button>
-          <button
-            onClick={() => onOpenChange(false)}
-            className="px-4 py-1.5 text-secondary text-xs font-semibold hover:underline"
-          >
-            CANCEL
-          </button>
         </div>
       </DialogContent>
     </Dialog>

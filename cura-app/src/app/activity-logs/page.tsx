@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { getActivityLogs, ActivityLog } from "@/lib/api/activity-logs";
 import { ActivityLogDetailsModal } from "@/components/modals/ActivityLogDetailsModal";
+import { RouteGuard } from "@/components/auth/RouteGuard";
 
 export default function ActivityLogsPage() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -73,12 +74,24 @@ export default function ActivityLogsPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <Header />
+    <RouteGuard allowedRoles={["clinician", "professor"]}>
+    <div className="min-h-screen flex flex-col relative">
+      {/* Background Image */}
+      <div 
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg-homepage.png)' }}
+      />
+      
+      {/* White Opaque Overlay */}
+      <div className="fixed inset-0 z-0 bg-white/60" />
+      
+      {/* Content */}
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <Header />
 
       <main className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-5 p-3 sm:p-5 max-w-[1400px] mx-auto w-full">
         {/* Left Sidebar - Hidden on mobile */}
-        <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4">
+        <aside className="hidden lg:block w-[200px] flex-shrink-0 space-y-4 animate-enter">
           <ProfileCard />
           <SchedulePlanner />
         </aside>
@@ -89,77 +102,82 @@ export default function ActivityLogsPage() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 bg-white rounded-lg shadow-md p-3 sm:p-5">
+        <div className="flex-1">
           <Link href="/home" className="text-secondary text-sm mb-4 inline-block hover:underline">
             ← Back to Home
           </Link>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 mb-4 sm:mb-6">
-            <h1 className="bg-secondary text-white text-xs sm:text-sm font-semibold py-2 px-4 rounded-md">
-              ACTIVITY LOGS
-            </h1>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <span className="text-xs font-semibold text-secondary hidden sm:inline">SEARCH</span>
-              <div className="flex items-center bg-gray-100 rounded-md px-3 py-1 flex-1 sm:flex-none">
-                <Input
+
+          {/* Header Bar */}
+          <div className="bg-secondary rounded-lg p-5 mb-5 shadow relative animate-enter">
+            <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_80%_50%,white_0%,transparent_50%)]" />
+            <div className="relative flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h1 className="text-white font-bold text-lg uppercase tracking-wide">Activity Logs</h1>
+                <p className="text-white/60 text-xs mt-0.5">Track all actions performed on your account</p>
+              </div>
+              <div className="flex items-center bg-white/10 rounded-lg overflow-hidden border border-white/20 focus-within:bg-white/20 focus-within:border-white/40 transition-all">
+                <Search className="h-3.5 w-3.5 text-white/50 ml-3 flex-shrink-0" />
+                <input
                   type="text"
-                  placeholder="Search..."
+                  placeholder="Search logs..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="border-none bg-transparent shadow-none focus-visible:ring-0 w-full sm:w-[200px] text-xs sm:text-sm"
+                  className="px-3 py-2.5 text-xs outline-none w-[180px] sm:w-[240px] bg-transparent text-white placeholder:text-white/40 font-medium"
                 />
-                <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8">
-                  <Search className="h-3 w-3 sm:h-4 sm:w-4" />
-                </Button>
               </div>
             </div>
           </div>
 
           {/* Desktop Table */}
-          <div className="hidden sm:block overflow-x-auto">
+          <div className="hidden sm:block">
             {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading activity logs...</div>
+              <div className="text-center py-12 text-muted-foreground text-sm">Loading activity logs...</div>
             ) : filteredLogs.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-12 text-muted-foreground text-sm">
                 {searchQuery ? "No logs found matching your search." : "No activity logs yet."}
               </div>
             ) : (
-              <table className="w-full border-separate border-spacing-y-2">
-                <thead>
-                  <tr>
-                    <th className="bg-primary text-secondary text-xs font-semibold py-3 px-3 sm:px-5 text-center rounded-l-lg w-[150px] sm:w-[200px]">
-                      DATE PERFORMED
-                    </th>
-                    <th className="bg-primary text-secondary text-xs font-semibold py-3 px-3 sm:px-5 text-center rounded-r-lg">
-                      DESCRIPTION
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentLogs.map((log) => (
-                    <tr 
-                      key={log.id}
-                      onClick={() => handleLogClick(log)}
-                      className="cursor-pointer hover:opacity-80 transition-opacity"
-                    >
-                      <td className="bg-gray-50 py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-l-lg">
-                        {formatDateTime(log.created_at)}
-                      </td>
-                      <td className="bg-gray-50 py-3 px-3 sm:px-5 text-center text-xs sm:text-sm rounded-r-lg">
-                        {log.description}
-                      </td>
+              <div className="rounded-lg border-2 border-[#87c4d8]/50 shadow overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-secondary text-white">
+                      <th className="py-3 px-5 text-left font-bold uppercase tracking-wide w-[200px]">
+                        Date Performed
+                      </th>
+                      <th className="py-3 px-5 text-left font-bold uppercase tracking-wide">
+                        Description
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {currentLogs.map((log, idx) => (
+                      <tr 
+                        key={log.id}
+                        onClick={() => handleLogClick(log)}
+                        className={`border-b border-[#87c4d8]/30 hover:bg-[#87c4d8]/15 transition-colors cursor-pointer ${
+                          idx % 2 === 0 ? "bg-white" : "bg-[#87c4d8]/5"
+                        }`}
+                      >
+                        <td className="py-3 px-5 font-semibold text-secondary whitespace-nowrap">
+                          {formatDateTime(log.created_at)}
+                        </td>
+                        <td className="py-3 px-5 text-gray-700 font-medium">
+                          {log.description}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
           {/* Mobile Cards */}
           <div className="sm:hidden space-y-3">
             {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading activity logs...</div>
+              <div className="text-center py-12 text-muted-foreground text-sm">Loading activity logs...</div>
             ) : filteredLogs.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-12 text-muted-foreground text-sm">
                 {searchQuery ? "No logs found matching your search." : "No activity logs yet."}
               </div>
             ) : (
@@ -167,10 +185,10 @@ export default function ActivityLogsPage() {
                 <div 
                   key={log.id} 
                   onClick={() => handleLogClick(log)}
-                  className="bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="bg-[#87c4d8]/25 backdrop-blur-sm rounded-lg p-4 cursor-pointer hover:bg-[#87c4d8]/35 transition-colors border-2 border-[#87c4d8]/50"
                 >
-                  <div className="text-[10px] text-gray-500 mb-1">{formatDateTime(log.created_at)}</div>
-                  <div className="text-xs text-gray-700">{log.description}</div>
+                  <div className="text-[10px] text-secondary/70 mb-1.5 font-bold uppercase tracking-wide">{formatDateTime(log.created_at)}</div>
+                  <div className="text-xs text-gray-700 font-medium">{log.description}</div>
                 </div>
               ))
             )}
@@ -179,39 +197,37 @@ export default function ActivityLogsPage() {
           {/* Pagination */}
           {!loading && filteredLogs.length > 0 && (
             <div className="flex justify-center items-center gap-2 mt-6">
-              <Button
-                variant="outline"
-                size="sm"
+              <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
-                className="text-xs"
+                className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide border-2 border-[#87c4d8]/50 rounded-lg hover:bg-[#87c4d8]/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-secondary"
               >
                 Previous
-              </Button>
+              </button>
               
               <div className="flex gap-1">
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-                  <Button
+                  <button
                     key={pageNum}
-                    variant={currentPage === pageNum ? "default" : "outline"}
-                    size="sm"
                     onClick={() => handlePageChange(pageNum)}
-                    className="text-xs w-8 h-8"
+                    className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${
+                      currentPage === pageNum
+                        ? "bg-secondary text-white shadow"
+                        : "border-2 border-[#87c4d8]/50 text-secondary hover:bg-[#87c4d8]/15"
+                    }`}
                   >
                     {pageNum}
-                  </Button>
+                  </button>
                 ))}
               </div>
 
-              <Button
-                variant="outline"
-                size="sm"
+              <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
-                className="text-xs"
+                className="px-3 py-1.5 text-xs font-bold uppercase tracking-wide border-2 border-[#87c4d8]/50 rounded-lg hover:bg-[#87c4d8]/15 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-secondary"
               >
                 Next
-              </Button>
+              </button>
             </div>
           )}
         </div>
@@ -222,14 +238,16 @@ export default function ActivityLogsPage() {
         </div>
       </main>
 
-      <Footer />
-
       {/* Activity Log Details Modal */}
       <ActivityLogDetailsModal
         log={selectedLog}
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
       />
+
+        <Footer />
+      </div>
     </div>
+    </RouteGuard>
   );
 }

@@ -87,7 +87,7 @@ export const filterTaxonomy: ClinicalSection[] = [
       },
       {
         id: "op-pedo",
-        name: "Pedodontics",
+        name: "Pediatric Dentistry",
         treatmentServices: [
           { id: "op-pedo-1", name: "Scaling & Polishing + Topical Fluoride Application" },
           { id: "op-pedo-2", name: "Pedo Pit & Fissure Sealant" },
@@ -113,23 +113,13 @@ export const filterTaxonomy: ClinicalSection[] = [
     shortName: "Prostho",
     clinicalDisciplines: [
       {
-        id: "prostho-rpd",
-        name: "Removable Partial Denture",
+        id: "prostho-direct",
+        name: "Prosthodontics",
         treatmentServices: [
-          { id: "prostho-rpd-1", name: "Removable Partial Denture" },
+          { id: "prostho-rpd", name: "Removable Partial Dentures - Removable Partial Dentures" },
+          { id: "prostho-sd", name: "Single Partial Denture - Removable Partial Denture" },
+          { id: "prostho-cd", name: "Complete Dentures" },
         ],
-      },
-      {
-        id: "prostho-sd",
-        name: "Single Denture",
-        treatmentServices: [
-          { id: "prostho-sd-1", name: "Removable Partial Denture" },
-        ],
-      },
-      {
-        id: "prostho-cd",
-        name: "Complete Dentures",
-        treatmentServices: [],
       },
     ],
   },
@@ -141,18 +131,6 @@ export const filterTaxonomy: ClinicalSection[] = [
       {
         id: "ortho-corrective",
         name: "Corrective Orthodontics",
-        treatmentServices: [],
-      },
-    ],
-  },
-  {
-    id: "any",
-    name: "Any Clinical Section",
-    shortName: "Any",
-    clinicalDisciplines: [
-      {
-        id: "any-others",
-        name: "Others",
         treatmentServices: [],
       },
     ],

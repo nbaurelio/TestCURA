@@ -10,36 +10,48 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#FFFBEF",
-        foreground: "#1a3a5c",
+        background: "#F8F9FA",
+        foreground: "#1e3a5f",
         primary: {
-          DEFAULT: "#98C8FB",
-          foreground: "#1a3a5c",
+          DEFAULT: "#7BA8D1",
+          foreground: "#1e3a5f",
         },
         secondary: {
-          DEFAULT: "#1a3a5c",
+          DEFAULT: "#1e3a5f",
           foreground: "#ffffff",
         },
         muted: {
-          DEFAULT: "#f5f5f5",
-          foreground: "#666666",
+          DEFAULT: "#E8EAED",
+          foreground: "#5f6368",
         },
         accent: {
-          DEFAULT: "#98C8FB",
-          foreground: "#1a3a5c",
+          DEFAULT: "#5B8AB8",
+          foreground: "#ffffff",
         },
         card: {
           DEFAULT: "#ffffff",
-          foreground: "#1a3a5c",
+          foreground: "#1e3a5f",
         },
-        border: "#e0e0e0",
-        input: "#e0e0e0",
-        ring: "#98C8FB",
+        border: "#D1D5DB",
+        input: "#D1D5DB",
+        ring: "#5B8AB8",
+        success: {
+          DEFAULT: "#2D7A4F",
+          foreground: "#ffffff",
+        },
+        warning: {
+          DEFAULT: "#B8860B",
+          foreground: "#ffffff",
+        },
+        info: {
+          DEFAULT: "#4A7BA7",
+          foreground: "#ffffff",
+        },
       },
       borderRadius: {
-        lg: "15px",
-        md: "10px",
-        sm: "5px",
+        lg: "6px",
+        md: "4px",
+        sm: "3px",
       },
       fontFamily: {
         sans: ["Inter", "sans-serif"],

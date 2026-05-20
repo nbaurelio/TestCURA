@@ -1,0 +1,8 @@
+email,first_name,last_name,role,password,year_level,clinical_department,batch_name,subrole
+clinician1@example.com,Juan,Dela Cruz,clinician,password123,5th Year,OM,Batch 2025,
+clinician2@example.com,Maria,Santos,clinician,password123,6th Year,OP,Batch 2025,
+clinician3@example.com,Jose,Reyes,clinician,password123,Residency,Prostho,Batch 2024,
+clinician4@example.com,Ana,Garcia,clinician,password123,5th Year,Ortho,Batch 2026,
+prof1@example.com,Eduardo,Cruz,professor,password123,,,Faculty,Clinical Chair
+prof2@example.com,Imelda,Pascual,professor,password123,,,Faculty,Discipline Head
+admin1@example.com,Roberto,Aquino,clinical_admin,password123,,,Staff 2025,
