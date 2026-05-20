@@ -17,6 +17,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.register('/sw.js').catch((err) => {
+                console.warn('SW registration failed:', err);
+              });
+            }
+          `
+        }} />
+      </head>
       <body className={inter.className}>
         <Providers>{children}</Providers>
       </body>

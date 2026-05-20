@@ -327,11 +327,11 @@ function SchedulePageInner() {
         } else {
           await updateEvent(selectedEvent.id, eventData);
         }
-        sendSystemNotification("✅ Event Updated", `"${formData.title}" has been successfully updated.`);
+        sendSystemNotification("✅ Event Updated", `"${formData.title}" has been successfully updated.`, "calendar");
       } else {
         // Create new event
         await createEvent(eventData);
-        sendSystemNotification("✅ Event Created", `"${formData.title}" has been successfully created.`);
+        sendSystemNotification("✅ Event Created", `"${formData.title}" has been successfully created.`, "calendar");
       }
       
       await loadEvents(professorId || undefined, isClinicalAdmin, clinicalAdminId || undefined);
@@ -423,7 +423,7 @@ function SchedulePageInner() {
       setEventToDelete(null);
       setIsEventDetailsOpen(false);
       setSelectedEvent(null);
-      sendSystemNotification("🗑️ Event Deleted", `"${deletedTitle}" has been removed from your schedule.`);
+      sendSystemNotification("🗑️ Event Deleted", `"${deletedTitle}" has been removed from your schedule.`, "calendar");
     } catch (err) {
       console.error("Error deleting event:", err);
       alert("Failed to delete event");

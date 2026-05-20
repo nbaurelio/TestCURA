@@ -272,6 +272,7 @@ export default function AcceptedReferralsPage() {
                     onDelete={() => handleDeleteReferral(referral.id)}
                     onEditRequestSubmitted={() => loadReferrals()}
                     statusChangeReason={referral.status_change_reason}
+                    statusChangeDeclineReason={(referral as any).status_change_decline_reason}
                   />
                 ))
               )}

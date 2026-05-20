@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ export interface UserFormData {
   year_level?: string;
   clinical_department?: string; // also reused as "Clinical Section" for clinical_admin
   batch_name?: string;
-  adviser_id?: string | null;
+  adviser_ids?: string[]; // Multiple advisers for clinicians
   // Professor
   subrole?: string;
   // Clinical Admin (Discipline is UI-only until column is added to schema)
@@ -67,7 +67,7 @@ const EMPTY_FORM: UserFormData = {
   year_level: "",
   clinical_department: "",
   batch_name: "",
-  adviser_id: null,
+  adviser_ids: [],
   subrole: "",
   clinical_discipline: "",
   avatar_url: "",
@@ -116,7 +116,7 @@ export function SystemAdminUserDialog({
         year_level: user.year_level || "",
         clinical_department: user.clinical_department || "",
         batch_name: (user as any).batch_name || "",
-        adviser_id: (user as any).adviser_id || null,
+        adviser_ids: (user as any).adviser_ids || [],
         subrole: (user as any).subrole || "",
         clinical_discipline: "",
         avatar_url: user.avatar_url || "",
@@ -132,6 +132,16 @@ export function SystemAdminUserDialog({
 
   const update = <K extends keyof UserFormData>(key: K, value: UserFormData[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
+
+  // Auto-set fixed values for Clinical Admin when role is selected
+  useEffect(() => {
+    if (form.role === "clinical_admin") {
+      if (form.clinical_discipline !== "OD" || form.clinical_department !== "OM") {
+        update("clinical_discipline", "OD");
+        update("clinical_department", "OM");
+      }
+    }
+  }, [form.role, form.clinical_discipline, form.clinical_department]);
 
   const initials = (() => {
     const f = form.first_name?.[0] || "";
@@ -200,22 +210,18 @@ export function SystemAdminUserDialog({
     if (form.role === "clinical_admin") {
       return (
         <div className="grid grid-cols-2 gap-2">
-          <SelectField
-            label="Clinical Discipline"
-            value={form.clinical_discipline || ""}
-            onChange={v => update("clinical_discipline", v)}
-            options={CLINICAL_DISCIPLINES}
-            placeholder="Select discipline"
-            disabled={readOnly}
-          />
-          <SelectField
-            label="Clinical Section"
-            value={form.clinical_department || ""}
-            onChange={v => update("clinical_department", v)}
-            options={CLINICAL_SECTIONS}
-            placeholder="Select section"
-            disabled={readOnly}
-          />
+          <div>
+            <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Discipline</label>
+            <div className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 flex items-center bg-gray-100 text-gray-600">
+              OD
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Clinical Section</label>
+            <div className="h-8 w-full text-xs border border-gray-300 rounded-md px-2 flex items-center bg-gray-100 text-gray-600">
+              OM
+            </div>
+          </div>
         </div>
       );
     }
@@ -269,23 +275,17 @@ export function SystemAdminUserDialog({
             disabled={readOnly}
           />
         </div>
-        {/* Adviser: assigns this clinician as an advisee of the chosen
-            professor. Stored as `adviser_id` on the profiles table. */}
+        {/* Advisers: assigns this clinician to multiple professors.
+            Stored as `adviser_ids` array on the profiles table. */}
         <div>
-          <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Adviser</label>
-          <select
-            className="w-full h-8 text-xs border border-gray-300 rounded px-2 focus:ring-secondary focus:border-secondary disabled:opacity-60 disabled:cursor-not-allowed bg-white"
-            value={form.adviser_id || ""}
-            onChange={e => update("adviser_id", e.target.value || null)}
+          <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Advisers</label>
+          <ProfessorTagInput
+            professors={professors}
+            selectedIds={form.adviser_ids || []}
+            onChange={(ids) => update("adviser_ids", ids)}
             disabled={readOnly}
-          >
-            <option value="">No adviser</option>
-            {professors.map(p => (
-              <option key={p.id} value={p.id}>
-                {`${p.first_name || ""} ${p.last_name || ""}`.trim() || p.email}
-              </option>
-            ))}
-          </select>
+            placeholder="Type professor name and press Enter..."
+          />
         </div>
       </>
     );
@@ -514,7 +514,168 @@ export function SystemAdminUserDialog({
   );
 }
 
-// â”€â”€â”€ Small reusable select field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Professor tag input (like MedicalAlertTagInput) ────────────────────────────────────
+function ProfessorTagInput({
+  professors,
+  selectedIds,
+  onChange,
+  disabled,
+  placeholder,
+}: {
+  professors: Profile[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const [inputValue, setInputValue] = useState("");
+  const [suggestions, setSuggestions] = useState<Profile[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedProfessors = professors.filter((p) => selectedIds.includes(p.id));
+
+  const getProfName = (p: Profile) =>
+    `${p.first_name || ""} ${p.last_name || ""}`.trim() || p.email;
+
+  const addProfessor = (prof: Profile) => {
+    if (selectedIds.includes(prof.id)) {
+      setInputValue("");
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    onChange([...selectedIds, prof.id]);
+    setInputValue("");
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setHighlightedIndex(-1);
+  };
+
+  const removeProfessor = (index: number) => {
+    const profToRemove = selectedProfessors[index];
+    onChange(selectedIds.filter((id) => id !== profToRemove.id));
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputValue(val);
+    setHighlightedIndex(-1);
+    if (val.trim().length > 0) {
+      const filtered = professors.filter(
+        (p) =>
+          getProfName(p).toLowerCase().includes(val.toLowerCase()) &&
+          !selectedIds.includes(p.id)
+      );
+      setSuggestions(filtered.slice(0, 6));
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+        addProfessor(suggestions[highlightedIndex]);
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedIndex((prev) => Math.min(prev + 1, suggestions.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedIndex((prev) => Math.max(prev - 1, -1));
+    } else if (e.key === "Escape") {
+      setShowSuggestions(false);
+      setHighlightedIndex(-1);
+    } else if (e.key === "Backspace" && inputValue === "" && selectedProfessors.length > 0) {
+      removeProfessor(selectedProfessors.length - 1);
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div
+        className={`min-h-[36px] w-full px-2 py-1.5 border border-gray-300 rounded-lg bg-white flex flex-wrap gap-1 cursor-text ${
+          disabled ? "bg-gray-100 cursor-not-allowed opacity-60" : ""
+        }`}
+        onClick={() => !disabled && inputRef.current?.focus()}
+      >
+        {selectedProfessors.map((p, i) => (
+          <span
+            key={p.id}
+            className="inline-flex items-center gap-1 bg-secondary text-white text-[10px] font-semibold px-2 py-0.5 rounded-md"
+          >
+            {getProfName(p)}
+            {!disabled && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeProfessor(i);
+                }}
+                className="hover:bg-white/20 rounded-sm p-0.5 transition-colors"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            )}
+          </span>
+        ))}
+        {!disabled && (
+          <input
+            ref={inputRef}
+            value={inputValue}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onFocus={() => {
+              if (inputValue.trim() && suggestions.length > 0) setShowSuggestions(true);
+            }}
+            placeholder={selectedProfessors.length === 0 ? placeholder : ""}
+            className="flex-1 min-w-[120px] text-xs outline-none bg-transparent placeholder:text-gray-400 focus:ring-0"
+            disabled={disabled}
+          />
+        )}
+      </div>
+
+      {showSuggestions && suggestions.length > 0 && (
+        <ul className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          {suggestions.map((p, i) => (
+            <li
+              key={p.id}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                addProfessor(p);
+              }}
+              className={`px-3 py-1.5 text-xs cursor-pointer transition-colors ${
+                i === highlightedIndex
+                  ? "bg-secondary text-white"
+                  : "text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {getProfName(p)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─── Small reusable select field ─────────────────────────────────────────────────────────
 function SelectField({
   label,
   value,

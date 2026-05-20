@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Search, Plus, MoreHorizontal, Eye, Pencil, Lock, Unlock, ShieldCheck } from "lucide-react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { Search, Plus, MoreHorizontal, Eye, Pencil, Lock, Unlock, ShieldCheck, Upload, Download, FileSpreadsheet, X, CheckCircle, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { createProfile, getAllProfiles, getCurrentUserId, updateProfile, Profile, INACTIVITY_THRESHOLD_MS } from "@/lib/api/profiles";
 import { useAuth } from "@/context/AuthContext";
@@ -12,6 +12,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SystemAdminUserDialog } from "@/components/modals/SystemAdminUserDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 type UserStatus = "ACTIVE" | "INACTIVE" | "LOCKED";
@@ -52,6 +58,11 @@ export default function SystemAdminUsersPage() {
     mode: "add" | "edit" | "view";
     target: UserRow | null;
   }>({ open: false, mode: "add", target: null });
+
+  // Bulk upload state
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState<{ current: number; total: number; success: number; failed: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load profiles. We auto-flip ACTIVE accounts to INACTIVE when their
   // `last_active_at` (or `created_at` for legacy rows missing the column)
@@ -134,6 +145,102 @@ export default function SystemAdminUsersPage() {
     setDialogState({ open: true, mode: "view", target: u });
   const handleUpdate = (u: UserRow) =>
     setDialogState({ open: true, mode: "edit", target: u });
+
+  // ── Bulk Upload handlers ─────────────────────────────────────────────
+  const downloadCsvTemplate = () => {
+    const headers = ["email", "first_name", "last_name", "role", "password", "year_level", "clinical_department", "batch_name", "subrole"];
+    const sampleRow = ["user@example.com", "John", "Doe", "clinician", "tempPass123", "3", "OM", "Batch 2025", "Student"];
+    const csvContent = [headers.join(","), sampleRow.join(",")].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "user_upload_template.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("CSV template downloaded");
+  };
+
+  const parseCsv = (text: string): Record<string, string>[] => {
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+    const rows: Record<string, string>[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(",").map(v => v.trim());
+      const row: Record<string, string> = {};
+      headers.forEach((h, idx) => { row[h] = values[idx] || ""; });
+      rows.push(row);
+    }
+    return rows;
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!file.name.endsWith(".csv")) {
+      toast.error("Please upload a CSV file");
+      return;
+    }
+    const text = await file.text();
+    const rows = parseCsv(text);
+    if (rows.length === 0) {
+      toast.error("CSV file is empty or invalid");
+      return;
+    }
+
+    setBulkUploadProgress({ current: 0, total: rows.length, success: 0, failed: 0, errors: [] });
+
+    const errors: string[] = [];
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      setBulkUploadProgress(prev => prev ? { ...prev, current: i + 1 } : null);
+
+      // Validate required fields
+      if (!row.email || !row.first_name || !row.last_name || !row.role) {
+        errors.push(`Row ${i + 1}: Missing required fields (email, first_name, last_name, role)`);
+        failedCount++;
+        continue;
+      }
+
+      try {
+        const created = await createProfile({
+          email: row.email,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          role: row.role,
+          year_level: row.year_level || null,
+          clinical_department: row.clinical_department || null,
+          batch_name: row.batch_name || null,
+          subrole: row.subrole || null,
+          password: row.password || undefined,
+        } as any);
+
+        if (created) {
+          successCount++;
+          setUsers(prev => [{ ...created, status: "ACTIVE" } as UserRow, ...prev]);
+        } else {
+          errors.push(`Row ${i + 1}: Failed to create user ${row.email}`);
+          failedCount++;
+        }
+      } catch (err) {
+        errors.push(`Row ${i + 1}: Error creating ${row.email} - ${err instanceof Error ? err.message : "Unknown error"}`);
+        failedCount++;
+      }
+    }
+
+    setBulkUploadProgress(prev => prev ? { ...prev, success: successCount, failed: failedCount, errors } : null);
+
+    if (successCount > 0) {
+      toast.success(`${successCount} users created successfully`);
+    }
+    if (failedCount > 0) {
+      toast.error(`${failedCount} users failed to create`);
+    }
+  };
   // Unlock clears the failed-attempts counter so the user starts fresh.
   const handleUnlock = (u: UserRow) =>
     applyStatus(u, "ACTIVE", { failed_login_attempts: 0 }, `${u.first_name} ${u.last_name} unlocked`);
@@ -153,19 +260,28 @@ export default function SystemAdminUsersPage() {
         <header className="px-5 sm:px-6 py-4 flex items-center justify-between gap-3 border-b border-[#87c4d8]/30 bg-gradient-to-r from-white to-[#87c4d8]/5">
           <div className="min-w-0">
             <h1 className="text-secondary font-bold text-sm uppercase tracking-wider">
-              Users Management
+              User Management
             </h1>
             <p className="text-[10px] text-gray-500 mt-0.5">
               {loading ? "Loading users…" : `${filteredUsers.length} of ${users.length} users`}
             </p>
           </div>
-          <button
-            onClick={() => setDialogState({ open: true, mode: "add", target: null })}
-            className="inline-flex items-center gap-1.5 bg-secondary hover:bg-secondary/90 text-white text-[11px] font-bold uppercase tracking-wide px-4 py-2 rounded-lg shadow-sm transition-all"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add User
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsBulkUploadOpen(true)}
+              className="inline-flex items-center gap-1.5 bg-white border-2 border-secondary hover:bg-secondary/5 text-secondary text-[11px] font-bold uppercase tracking-wide px-4 py-2 rounded-lg shadow-sm transition-all"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Bulk Upload
+            </button>
+            <button
+              onClick={() => setDialogState({ open: true, mode: "add", target: null })}
+              className="inline-flex items-center gap-1.5 bg-secondary hover:bg-secondary/90 text-white text-[11px] font-bold uppercase tracking-wide px-4 py-2 rounded-lg shadow-sm transition-all"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add User
+            </button>
+          </div>
         </header>
 
         {/* Filter bar */}
@@ -260,7 +376,7 @@ export default function SystemAdminUsersPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleUpdate(u)} className="cursor-pointer">
                             <Pencil className="h-3.5 w-3.5 mr-2 text-secondary/70" />
-                            Update
+                            Edit
                           </DropdownMenuItem>
 
                           {u.status === "LOCKED" ? (
@@ -297,6 +413,142 @@ export default function SystemAdminUsersPage() {
         </div>
       </section>
 
+      {/* ── Bulk Upload Dialog ────────── */}
+      <Dialog open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen}>
+        <DialogContent className="bg-white max-w-md w-[92vw] sm:w-full p-0 gap-0 rounded-xl overflow-hidden shadow-xl">
+          <DialogHeader className="bg-secondary p-4 sticky top-0 z-10">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-white font-bold text-sm uppercase tracking-wide">
+                Bulk User Upload
+              </DialogTitle>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBulkUploadOpen(false);
+                  setBulkUploadProgress(null);
+                }}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors"
+              >
+                <X className="h-3.5 w-3.5 text-white" />
+              </button>
+            </div>
+            <p className="text-white/70 text-[10px] leading-snug mt-0.5">
+              Upload multiple users via CSV file
+            </p>
+          </DialogHeader>
+
+          <div className="p-5 space-y-4">
+            {/* Template Download */}
+            <div className="bg-[#87c4d8]/[0.06] rounded-lg p-4 border border-[#87c4d8]/30">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-secondary/10">
+                  <FileSpreadsheet className="h-4 w-4 text-secondary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold text-secondary mb-1">CSV Template</p>
+                  <p className="text-[10px] text-gray-500 mb-2">
+                    Download the template with required columns: email, first_name, last_name, role, password (optional), year_level, clinical_department, batch_name, subrole
+                  </p>
+                  <button
+                    onClick={downloadCsvTemplate}
+                    className="inline-flex items-center gap-1.5 text-[10px] font-bold text-secondary hover:text-secondary/80 transition-colors"
+                  >
+                    <Download className="h-3 w-3" />
+                    Download Template
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* File Upload */}
+            {!bulkUploadProgress && (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-[#87c4d8]/40 rounded-lg p-6 text-center cursor-pointer hover:border-secondary/60 hover:bg-[#87c4d8]/[0.04] transition-all"
+              >
+                <Upload className="h-6 w-6 text-secondary/50 mx-auto mb-2" />
+                <p className="text-[11px] font-semibold text-secondary mb-1">Click to upload CSV</p>
+                <p className="text-[9px] text-gray-400">or drag and drop your file here</p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileUpload(file);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Progress */}
+            {bulkUploadProgress && (
+              <div className="space-y-3">
+                {/* Progress bar */}
+                <div className="bg-gray-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-secondary h-full transition-all duration-300"
+                    style={{ width: `${(bulkUploadProgress.current / bulkUploadProgress.total) * 100}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-gray-500">
+                    Processing {bulkUploadProgress.current} of {bulkUploadProgress.total}
+                  </span>
+                  <span className="text-secondary font-semibold">
+                    {Math.round((bulkUploadProgress.current / bulkUploadProgress.total) * 100)}%
+                  </span>
+                </div>
+
+                {/* Results */}
+                {bulkUploadProgress.current === bulkUploadProgress.total && (
+                  <div className="space-y-2 pt-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-[11px] font-semibold text-green-600">
+                        {bulkUploadProgress.success} created successfully
+                      </span>
+                    </div>
+                    {bulkUploadProgress.failed > 0 && (
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-red-500" />
+                        <span className="text-[11px] font-semibold text-red-600">
+                          {bulkUploadProgress.failed} failed
+                        </span>
+                      </div>
+                    )}
+                    {bulkUploadProgress.errors.length > 0 && (
+                      <div className="bg-red-50 rounded-lg p-3 border border-red-200 max-h-32 overflow-y-auto">
+                        <p className="text-[10px] font-semibold text-red-700 mb-1">Errors:</p>
+                        {bulkUploadProgress.errors.slice(0, 5).map((err, idx) => (
+                          <p key={idx} className="text-[9px] text-red-600 leading-relaxed">{err}</p>
+                        ))}
+                        {bulkUploadProgress.errors.length > 5 && (
+                          <p className="text-[9px] text-red-500 italic">
+                            ...and {bulkUploadProgress.errors.length - 5} more
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        setBulkUploadProgress(null);
+                        setIsBulkUploadOpen(false);
+                      }}
+                      className="w-full mt-2 bg-secondary hover:bg-secondary/90 text-white text-[11px] font-bold uppercase tracking-wide px-4 py-2 rounded-lg shadow-sm transition-all"
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Add / Edit User modal (Radix Dialog — portal-rendered) ────────── */}
       <SystemAdminUserDialog
         open={dialogState.open}
@@ -317,8 +569,8 @@ export default function SystemAdminUsersPage() {
               batch_name: data.batch_name,
               subrole: data.subrole || null,
               avatar_url: data.avatar_url,
-              // Only attach an adviser when the role can have one.
-              adviser_id: data.role === "clinician" ? (data.adviser_id ?? null) : null,
+              // Only attach advisers when the role can have them.
+              adviser_ids: data.role === "clinician" ? (data.adviser_ids ?? []) : [],
               ...(data.password ? { password: data.password } : {}),
             } as any);
 
@@ -343,8 +595,8 @@ export default function SystemAdminUsersPage() {
               batch_name: data.batch_name,
               subrole: data.subrole || null,
               avatar_url: data.avatar_url,
-              // Clear adviser when the user is no longer a clinician.
-              adviser_id: data.role === "clinician" ? (data.adviser_id ?? null) : null,
+              // Clear advisers when the user is no longer a clinician.
+              adviser_ids: data.role === "clinician" ? (data.adviser_ids ?? []) : [],
             };
             // Only set the password if the admin actually typed a new one.
             // Empty string means "keep current".

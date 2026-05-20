@@ -24,7 +24,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { sendSystemNotification } from "@/lib/utils/notify";
+import { sendSystemNotification, requestNotificationPermission } from "@/lib/utils/notify";
 
 type ReferralStatus = "ALL" | "AVAILABLE" | "ONGOING" | "COMPLETED" | "DEFERRED" | "BLACKLISTED";
 type RequestType = "ALL" | "REREFERRALS" | "EDIT_REQUESTS" | "DELETION_REQUESTS" | "STATUS_REQUESTS";
@@ -98,6 +98,7 @@ export default function ProfessorDashboard() {
   }, []);
 
   useEffect(() => {
+    requestNotificationPermission();
     loadData();
   }, []);
 
@@ -329,7 +330,7 @@ export default function ProfessorDashboard() {
       setIsApproveRereferOpen(false);
       setRereferToApprove(null);
       loadData();
-      sendSystemNotification("✅ Rerefer Approved", `Approved by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("✅ Rerefer Approved", `Approved by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error approving rerefer request:", error);
     }
@@ -349,7 +350,7 @@ export default function ProfessorDashboard() {
       setRereferToDecline(null);
       setDeclineReason("");
       loadData();
-      sendSystemNotification("❌ Rerefer Declined", `Declined by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("❌ Rerefer Declined", `Declined by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error declining rerefer request:", error);
     }
@@ -370,7 +371,7 @@ export default function ProfessorDashboard() {
       setIsApproveConfirmOpen(false);
       setReferralToApprove(null);
       await loadData();
-      sendSystemNotification("✅ Referral Approved", `The referral has been approved by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("✅ Referral Approved", `The referral has been approved by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error approving referral:", error);
       alert("Failed to approve referral. Please check the console for details.");
@@ -414,7 +415,7 @@ export default function ProfessorDashboard() {
       setIsApproveEditOpen(false);
       setEditRequestToAction(null);
       await loadData();
-      sendSystemNotification("✅ Edit Request Approved", `Approved by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("✅ Edit Request Approved", `Approved by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error approving edit request:", error);
     }
@@ -428,7 +429,7 @@ export default function ProfessorDashboard() {
       setEditRequestToAction(null);
       setDeclineReason("");
       await loadData();
-      sendSystemNotification("❌ Edit Request Declined", `Declined by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("❌ Edit Request Declined", `Declined by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error declining edit request:", error);
     }
@@ -452,7 +453,7 @@ export default function ProfessorDashboard() {
       setIsApproveDeletionOpen(false);
       setDeletionRequestToAction(null);
       await loadData();
-      sendSystemNotification("✅ Deletion Approved", `Approved by ${currentUserName || "Professor"}. The referral has been removed.`);
+      sendSystemNotification("✅ Deletion Approved", `Approved by ${currentUserName || "Professor"}. The referral has been removed.`, "referral");
     } catch (error) {
       console.error("Error approving deletion request:", error);
       alert("Failed to approve deletion request.");
@@ -467,7 +468,7 @@ export default function ProfessorDashboard() {
       setDeletionRequestToAction(null);
       setDeclineReason("");
       await loadData();
-      sendSystemNotification("❌ Deletion Declined", `Declined by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("❌ Deletion Declined", `Declined by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error declining deletion request:", error);
     }
@@ -547,7 +548,7 @@ export default function ProfessorDashboard() {
       setIsApproveStatusChangeOpen(false);
       setStatusChangeToAction(null);
       await loadData();
-      sendSystemNotification("✅ Status Change Approved", `Approved by ${currentUserName || "Professor"}.`);
+      sendSystemNotification("✅ Status Change Approved", `Approved by ${currentUserName || "Professor"}.`, "referral");
     } catch (error) {
       console.error("Error approving status change:", error);
       alert("Failed to approve status change.");
@@ -604,7 +605,7 @@ export default function ProfessorDashboard() {
       setStatusChangeToAction(null);
       setDeclineReason("");
       await loadData();
-      sendSystemNotification("❌ Status Change Declined", `Declined by ${currentUserName || "Professor"}. Referral reverted to ongoing.`);
+      sendSystemNotification("❌ Status Change Declined", `Declined by ${currentUserName || "Professor"}. Referral reverted to ongoing.`, "referral");
     } catch (error) {
       console.error("Error declining status change:", error);
     }

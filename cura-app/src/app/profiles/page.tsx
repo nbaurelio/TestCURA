@@ -109,7 +109,7 @@ export default function ProfilesPage() {
     setLogsLoading(true);
     try {
       const adviseeIds = profiles
-        .filter(p => p.adviser_id === professor.id)
+        .filter(p => p.adviser_ids?.includes(professor.id))
         .map(p => p.id);
       const [{ data: profData }, { data: profStatusData }, { data: statusData }] = await Promise.all([
         (supabase.from("activity_logs") as any)
@@ -486,7 +486,7 @@ export default function ProfilesPage() {
                   <Users className="h-3.5 w-3.5" /> Info
                 </button>
                 {selectedProfile.role === "professor" && (() => {
-                  const profAdvisees = profiles.filter(p => p.adviser_id === selectedProfile.id);
+                  const profAdvisees = profiles.filter(p => p.adviser_ids?.includes(selectedProfile.id));
                   return (
                     <button onClick={() => setProfileTab("advisees")} className={`flex-1 py-2.5 text-[11px] font-bold uppercase tracking-wide transition-colors flex items-center justify-center gap-1.5 ${profileTab === "advisees" ? "text-secondary border-b-2 border-secondary bg-secondary/5" : "text-gray-400 hover:text-secondary"}`}>
                       <Users className="h-3.5 w-3.5" /> Advisees <span className="ml-1 bg-gray-100 text-gray-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{profAdvisees.length}</span>
@@ -804,7 +804,7 @@ export default function ProfilesPage() {
 
                 {/* Advisees Tab — professors only */}
                 {profileTab === "advisees" && selectedProfile.role === "professor" && (() => {
-                  const profAdvisees = profiles.filter(p => p.adviser_id === selectedProfile.id);
+                  const profAdvisees = profiles.filter(p => p.adviser_ids?.includes(selectedProfile.id));
                   return (
                     <div className="px-5 py-4 space-y-2">
                       {profAdvisees.length === 0 ? (

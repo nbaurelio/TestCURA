@@ -35,7 +35,6 @@ import {
   RefreshCw,
   CalendarCheck,
   CalendarX,
-  CalendarSync,
   CalendarOff,
   CalendarClock,
   UserCheck,
@@ -97,10 +96,41 @@ function daysBetween(a: string | null, b: string | null): number | null {
   return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
+/**
+ * Returns the date from which the overdue countdown should start.
+ * Only referrals with a tentative appointment schedule can become overdue.
+ * Returns null (never overdue) when no appointment is set.
+ */
+function overdueStartDate(r: { tentative_appointment_schedule?: string | null }): string | null {
+  return r.tentative_appointment_schedule ?? null;
+}
+
 const OVERDUE_DAYS = 7;
 const PERIOD_LABELS: Record<TimePeriod, string> = {
   week: "7 Days", "5weeks": "5 Weeks", "10weeks": "10 Weeks", "15weeks": "15 Weeks", all: "All Time",
 };
+
+function getBucketKey(d: Date, period: TimePeriod): string {
+  if (period === "all") {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  } else if (period === "week") {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  } else {
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d.getFullYear(), d.getMonth(), diff);
+    return `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, "0")}-${String(mon.getDate()).padStart(2, "0")}`;
+  }
+}
+
+function formatBucketLabel(key: string, period: TimePeriod): string {
+  if (period === "all") {
+    const [y, m] = key.split("-");
+    return `${new Date(+y, +m - 1).toLocaleString("en-US", { month: "short" })} '${y.slice(-2)}`;
+  }
+  const [y, m, day] = key.split("-");
+  return new Date(+y, +m - 1, +day).toLocaleString("en-US", { month: "short", day: "numeric" });
+}
 
 // ─── Placeholder chart block ─────────────────────────────────────────────────
 function ChartPlaceholder({ height = "h-[240px]" }: { height?: string }) {
@@ -367,6 +397,7 @@ export default function ProfessorAnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>("all");
+  const [customRange, setCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [selectedClinicianId, setSelectedClinicianId] = useState<string | null>(null);
   const [clinicianSearch, setClinicianSearch] = useState("");
   const [clinicianDropdownOpen, setClinicianDropdownOpen] = useState(false);
@@ -396,26 +427,44 @@ export default function ProfessorAnalyticsDashboard() {
 
   // ── Scope helpers ───────────────────────────────────────────────────────────
   const adviseeIds = useMemo(() => new Set(advisees.map(a => a.id)), [advisees]);
+  const allClinicianIds = useMemo(() => new Set(allClinicians.map(c => c.id)), [allClinicians]);
 
-  const periodStart = useMemo(() => getTimePeriodStart(timePeriod), [timePeriod]);
+  const periodStart = useMemo(() => {
+    if (customRange?.start) return new Date(customRange.start);
+    return new Date(2000, 0, 1);
+  }, [customRange]);
+
+  const periodEnd = useMemo(() => {
+    if (customRange?.end) {
+      const d = new Date(customRange.end);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    }
+    return null;
+  }, [customRange]);
 
   // All referrals in the selected time period, optionally scoped to advisees
   const createdByAdvisee = useMemo(() => {
     return referrals.filter(r => {
-      if (new Date(r.created_at) < periodStart) return false;
+      const created = new Date(r.created_at);
+      if (created < periodStart) return false;
+      if (periodEnd && created > periodEnd) return false;
       if (scopeFilter === "advisees" && !adviseeIds.has(r.user_id)) return false;
       return true;
     });
-  }, [referrals, periodStart, scopeFilter, adviseeIds]);
+  }, [referrals, periodStart, periodEnd, scopeFilter, adviseeIds]);
 
   // All referrals in the selected time period, optionally scoped to advisees
   const acceptedByAdvisee = useMemo(() => {
     return referrals.filter(r => {
-      if (new Date(r.created_at) < periodStart) return false;
+      const created = new Date(r.created_at);
+      if (created < periodStart) return false;
+      if (periodEnd && created > periodEnd) return false;
+      if (!allClinicianIds.has(r.accepted_by_user_id || "")) return false;
       if (scopeFilter === "advisees" && !adviseeIds.has(r.accepted_by_user_id || "")) return false;
       return true;
     });
-  }, [referrals, periodStart, scopeFilter, adviseeIds]);
+  }, [referrals, periodStart, periodEnd, scopeFilter, adviseeIds, allClinicianIds]);
 
   // ── Stat-card scoped datasets — additionally filtered by selected clinician.
   // These power the summary cards/modal only. Charts continue to use the
@@ -439,7 +488,7 @@ export default function ProfessorAnalyticsDashboard() {
   );
 
   const acceptedCount = useMemo(
-    () => cardAccepted.length,
+    () => cardAccepted.filter(r => r.accepted_by !== "None" && r.accepted_at).length,
     [cardAccepted]
   );
 
@@ -468,41 +517,50 @@ export default function ProfessorAnalyticsDashboard() {
   }, [cardCreated]);
 
   // Overdue = referral has been accepted, status is not completed, and more
-  // than OVERDUE_DAYS have passed since accepted_at without completion.
+  // than OVERDUE_DAYS have passed since the tentative appointment date
+  // (or accepted_at if no appointment is set). The appointment date must
+  // have already passed before the countdown begins.
   const overdueCount = useMemo(() => {
     const now = new Date().toISOString();
-    return cardCreated.filter(r => {
+    return cardAccepted.filter(r => {
       if (!r.accepted_at) return false;
       const rs = r.referral_status?.toLowerCase();
       if (rs === "completed" || rs === "deferred" || rs === "blacklisted") return false;
-      const age = daysBetween(r.accepted_at, now);
+      const startDate = overdueStartDate(r);
+      if (!startDate) return false;
+      // Appointment must have already passed before countdown starts
+      if (new Date(startDate) > new Date()) return false;
+      const age = daysBetween(startDate, now);
       return age !== null && age > OVERDUE_DAYS;
     }).length;
-  }, [cardCreated]);
+  }, [cardAccepted]);
 
   const availableCount = useMemo(
     () => cardCreated.filter(r => r.accepted_by === "None" || !r.accepted_at).length,
     [cardCreated]
   );
-  const ongoingCount = useMemo(
-    () => cardCreated.filter(r => {
-      if (r.accepted_by === "None" || !r.accepted_at) return false;
+  const ongoingCount = useMemo(() => {
+    const now = new Date().toISOString();
+    return cardAccepted.filter(r => {
       const rs = r.referral_status?.toLowerCase();
-      return !rs || rs === "ongoing";
-    }).length,
-    [cardCreated]
-  );
+      if (!rs && !r.accepted_at) return false;
+      if (rs && rs !== "ongoing") return false;
+      const startDate = overdueStartDate(r);
+      if (startDate && new Date(startDate) <= new Date() && (daysBetween(startDate, now) ?? 0) > OVERDUE_DAYS) return false;
+      return true;
+    }).length;
+  }, [cardAccepted]);
   const deferredCount = useMemo(
-    () => cardCreated.filter(r => r.referral_status === "deferred").length,
-    [cardCreated]
+    () => cardAccepted.filter(r => r.referral_status === "deferred").length,
+    [cardAccepted]
   );
   const blacklistedCount = useMemo(
-    () => cardCreated.filter(r => r.referral_status === "blacklisted").length,
-    [cardCreated]
+    () => cardAccepted.filter(r => r.referral_status === "blacklisted").length,
+    [cardAccepted]
   );
   const rereferredCount = useMemo(
-    () => cardCreated.filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed").length,
-    [cardCreated]
+    () => cardAccepted.filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed").length,
+    [cardAccepted]
   );
 
   // ── Advisee Referral Status — based on ACCEPTED referrals ─────────────────
@@ -524,56 +582,50 @@ export default function ProfessorAnalyticsDashboard() {
       .map(([name, value]) => ({ name, value }));
   }, [acceptedByAdvisee]);
 
-  // ── Advisee Referrals Over Time — monthly count of accepted referrals ──────
+  // ── Advisee Referrals Over Time — interval driven by timePeriod ────────────────
   const timelineData = useMemo(() => {
     const buckets: Record<string, { referrals: number; Overdue: number; MedAlert: number }> = {};
     const now = new Date();
     acceptedByAdvisee.forEach(r => {
-      const d = new Date(r.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (!buckets[key]) {
-        buckets[key] = { referrals: 0, Overdue: 0, MedAlert: 0 };
-      }
+      const key = getBucketKey(new Date(r.created_at), timePeriod);
+      if (!buckets[key]) buckets[key] = { referrals: 0, Overdue: 0, MedAlert: 0 };
       buckets[key].referrals++;
-      // Check for overdue
       const _rs = r.referral_status?.toLowerCase();
       if (r.accepted_at && _rs !== "completed" && _rs !== "deferred" && _rs !== "blacklisted") {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) {
-          buckets[key].Overdue++;
+        const _sd = overdueStartDate(r);
+        if (_sd && new Date(_sd) <= now) {
+          const age = daysBetween(_sd, now.toISOString());
+          if (age !== null && age > OVERDUE_DAYS) buckets[key].Overdue++;
         }
       }
-      // Check for medical alert
       if (r.medical_alert && r.medical_alert !== "None" && r.medical_alert !== "none") {
         buckets[key].MedAlert++;
       }
     });
-    const sorted = Object.entries(buckets)
+    return Object.entries(buckets)
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([month, data]) => ({ month, ...data }));
-    return sorted;
-  }, [acceptedByAdvisee]);
+      .map(([key, data]) => ({ month: formatBucketLabel(key, timePeriod), ...data }));
+  }, [acceptedByAdvisee, timePeriod]);
 
-  // ── Per-advisee referral volume by month (stacked bar) ──────────────────────
+  // ── Per-advisee referral volume by interval (stacked bar) ──────────────────
   const ADVISEE_VOLUME_COLORS = [
     "#5B8AB8", "#22C55E", "#F59E0B", "#A855F7",
     "#EF4444", "#14B8A6", "#F97316", "#EC4899",
     "#6366F1", "#84CC16", "#06B6D4", "#374151",
   ];
   const perAdviseeVolumeData = useMemo(() => {
-    const monthSet = new Set<string>();
+    const bucketSet = new Set<string>();
     const raw: Record<string, Record<string, number>> = {};
     acceptedByAdvisee.forEach(r => {
-      const d = new Date(r.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const key = getBucketKey(new Date(r.created_at), timePeriod);
       const uid = r.accepted_by_user_id || "";
       const adv = allClinicians.find(a => a.id === uid);
       const name = adv ? `${adv.first_name} ${adv.last_name || ""}`.trim() : (r.accepted_by || "Unknown");
-      monthSet.add(key);
+      bucketSet.add(key);
       if (!raw[key]) raw[key] = {};
       raw[key][name] = (raw[key][name] || 0) + 1;
     });
-    const months = Array.from(monthSet).sort();
+    const buckets = Array.from(bucketSet).sort();
     const adviseeNames = Array.from(
       new Set(acceptedByAdvisee.map(r => {
         const uid = r.accepted_by_user_id || "";
@@ -581,19 +633,16 @@ export default function ProfessorAnalyticsDashboard() {
         return adv ? `${adv.first_name} ${adv.last_name || ""}`.trim() : (r.accepted_by || "Unknown");
       }))
     ).sort();
-    const rows = months.map(key => {
-      const [y, m] = key.split("-");
-      const label = `${new Date(+y, +m - 1).toLocaleString("en-US", { month: "short" })} '${y.slice(-2)}`;
-      const entry: Record<string, any> = { month: label };
+    const rows = buckets.map(key => {
+      const entry: Record<string, any> = { month: formatBucketLabel(key, timePeriod) };
       adviseeNames.forEach(name => { entry[name] = raw[key]?.[name] || 0; });
       return entry;
     });
     return { rows, adviseeNames };
-  }, [acceptedByAdvisee, allClinicians]);
+  }, [acceptedByAdvisee, allClinicians, timePeriod]);
 
   // ── Turnaround time per advisee (accepted_at → completed_at) ────────────────
   const turnaroundData = useMemo(() => {
-    // Only completed referrals accepted by advisees
     const completed = acceptedByAdvisee.filter(r => r.referral_status === "completed");
     const adviseeMap: Record<string, { name: string; days: number[] }> = {};
     completed.forEach(r => {
@@ -672,14 +721,15 @@ export default function ProfessorAnalyticsDashboard() {
       if (scopeFilter === "advisees" && !adviseeIds.has(r.user_id)) return false;
       return true;
     });
-    const map: Record<string, { Referred: number; Accepted: number; Completed: number }> = {};
+    const map: Record<string, { Referred: number; Accepted: number; Ongoing: number; Completed: number }> = {};
     filtered.forEach(r => {
       const discipline = r.clinical_discipline_destination || r.clinical_discipline_origin || r.clinical_section_destination || r.clinical_section_origin;
       if (!discipline) return;
-      if (!map[discipline]) map[discipline] = { Referred: 0, Accepted: 0, Completed: 0 };
+      if (!map[discipline]) map[discipline] = { Referred: 0, Accepted: 0, Ongoing: 0, Completed: 0 };
       map[discipline].Referred++;
       const rs = r.referral_status?.toLowerCase();
       if (rs && ["accepted", "ongoing", "completed", "overdue"].includes(rs)) map[discipline].Accepted++;
+      if (!rs || rs === "ongoing") map[discipline].Ongoing++;
       if (rs === "completed") map[discipline].Completed++;
     });
     return Object.entries(map)
@@ -757,9 +807,9 @@ export default function ProfessorAnalyticsDashboard() {
       if (!r.accepted_at) {
         map[section].Pending++;
       } else {
-        const age = daysBetween(r.accepted_at, now);
         const _hmRs = r.referral_status?.toLowerCase();
-        if (age !== null && age > OVERDUE_DAYS && _hmRs !== "deferred" && _hmRs !== "blacklisted") map[section].Overdue++;
+        const _hmSd = overdueStartDate(r);
+        if (_hmSd && new Date(_hmSd) <= new Date(now) && (daysBetween(_hmSd, now) ?? 0) > OVERDUE_DAYS && _hmRs !== "deferred" && _hmRs !== "blacklisted") map[section].Overdue++;
         else map[section].Ongoing++;
       }
     });
@@ -921,6 +971,7 @@ export default function ProfessorAnalyticsDashboard() {
     const now = new Date();
     acceptedByAdvisee.forEach(r => {
       const uid = r.accepted_by_user_id || "";
+      if (!uid) return;
       if (!map[uid]) {
         const adv = allClinicians.find(a => a.id === uid);
         map[uid] = {
@@ -928,12 +979,13 @@ export default function ProfessorAnalyticsDashboard() {
           Completed: 0, Ongoing: 0, Deferred: 0, Blacklisted: 0, Pending: 0, Rereferred: 0, Overdue: 0, MedAlert: 0, total: 0,
         };
       }
-      // Check for overdue (pending for more than OVERDUE_DAYS days)
+      // Check for overdue (only if tentative appointment has passed by >7 days)
       const _perfRs = r.referral_status?.toLowerCase();
       if (r.accepted_at && _perfRs !== "completed" && _perfRs !== "deferred" && _perfRs !== "blacklisted") {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) {
-          map[uid].Overdue++;
+        const _perfSd = overdueStartDate(r);
+        if (_perfSd && new Date(_perfSd) <= new Date(now)) {
+          const age = daysBetween(_perfSd, now.toISOString());
+          if (age !== null && age > OVERDUE_DAYS) map[uid].Overdue++;
         }
       }
       // Check for medical alert
@@ -1068,7 +1120,7 @@ export default function ProfessorAnalyticsDashboard() {
     return Array.from(set).sort();
   }, [referrals]);
   const txStatusPerTreatmentData = useMemo(() => {
-    const map: Record<string, { Referred: number; Accepted: number; Completed: number }> = {};
+    const map: Record<string, { Referred: number; Accepted: number; Ongoing: number; Completed: number }> = {};
     const filtered = referrals.filter(r => {
       if (new Date(r.created_at) < periodStart) return false;
       if (scopeFilter === "advisees" && !adviseeIds.has(r.user_id)) return false;
@@ -1077,13 +1129,16 @@ export default function ProfessorAnalyticsDashboard() {
     filtered.forEach(r => {
       const svc = r.treatment_service_destination || "Unspecified";
       if (txStatusFilter !== "__all__" && svc !== txStatusFilter) return;
-      if (!map[svc]) map[svc] = { Referred: 0, Accepted: 0, Completed: 0 };
+      if (!map[svc]) map[svc] = { Referred: 0, Accepted: 0, Ongoing: 0, Completed: 0 };
       // Every referral counts as "Referred"
       map[svc].Referred++;
       // If it has been accepted (accepted_at exists), count as Accepted
       if (r.accepted_at) map[svc].Accepted++;
+      // If ongoing
+      const rs = r.referral_status?.toLowerCase();
+      if (!rs || rs === "ongoing") { if (r.accepted_at) map[svc].Ongoing++; }
       // If it is completed, count as Completed
-      if (r.referral_status === "completed") map[svc].Completed++;
+      if (rs === "completed") map[svc].Completed++;
     });
     return Object.entries(map)
       .map(([service, v]) => ({ service, ...v }))
@@ -1100,13 +1155,16 @@ export default function ProfessorAnalyticsDashboard() {
       const adv = allClinicians.find(a => a.id === (r.accepted_by_user_id || ""));
       const advName = adv ? `${adv.first_name} ${adv.last_name || ""}`.trim() : (r.accepted_by || "Unknown");
 
-      // Overdue: accepted, not completed/deferred/blacklisted, > 7 days since acceptance
+      // Overdue: accepted, has appointment, appointment passed, >7 days since appointment
       const _excRs = r.referral_status?.toLowerCase();
       if (r.accepted_at && _excRs !== "completed" && _excRs !== "deferred" && _excRs !== "blacklisted") {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) {
-          overdue++;
-          alertList.push({ advisee: advName, type: "Overdue", detail: `${age}d since accepted`, color: "#EF4444" });
+        const _excSd = overdueStartDate(r);
+        if (_excSd && new Date(_excSd) <= new Date(now)) {
+          const age = daysBetween(_excSd, now);
+          if (age !== null && age > OVERDUE_DAYS) {
+            overdue++;
+            alertList.push({ advisee: advName, type: "Overdue", detail: `${age}d since appointment`, color: "#EF4444" });
+          }
         }
       }
       // Medical alert
@@ -1201,10 +1259,13 @@ export default function ProfessorAnalyticsDashboard() {
       }
 
       // Exception/alert columns (additive — can overlap with status columns)
-      // Overdue = accepted, not completed/deferred/blacklisted, > 7 days since acceptance
+      // Overdue = accepted, has appointment, appointment passed, >7 days since appointment
       if (r.accepted_at && rs !== "completed" && rs !== "deferred" && rs !== "blacklisted") {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) { e.Overdue++; e.total++; e.details.Overdue.push({ chart: r.chart_number, detail: `${age}d overdue` }); }
+        const _eSd = overdueStartDate(r);
+        if (_eSd && new Date(_eSd) <= new Date(now)) {
+          const age = daysBetween(_eSd, now);
+          if (age !== null && age > OVERDUE_DAYS) { e.Overdue++; e.total++; e.details.Overdue.push({ chart: r.chart_number, detail: `${age}d overdue` }); }
+        }
       }
       if (r.medical_alert && r.medical_alert !== "None" && r.medical_alert !== "none") { e.MedAlert++; e.total++; e.details.MedAlert.push({ chart: r.chart_number, detail: r.medical_alert }); }
       if (r.rerefer_request_status === "approved") { e.Rereferred++; e.total++; e.details.Rereferred.push({ chart: r.chart_number, detail: "Re-referred" }); }
@@ -1285,15 +1346,16 @@ export default function ProfessorAnalyticsDashboard() {
 
   const efficiencyGapData = useMemo(() => {
     const { rows, serviceBaseline, serviceList } = efficiencyGapRaw;
+    // Negate so: red (slower) = negative = left, green (faster) = positive = right
     if (selectedService === "__all__") {
       return rows
-        .map(r => ({ name: r.name, gap: r.overallGap }))
-        .sort((a, b) => a.gap - b.gap);
+        .map(r => ({ name: r.name, gap: -r.overallGap }))
+        .sort((a, b) => b.gap - a.gap);
     }
     return rows
       .filter(r => r.gapByService[selectedService] !== undefined)
-      .map(r => ({ name: r.name, gap: r.gapByService[selectedService] }))
-      .sort((a, b) => a.gap - b.gap);
+      .map(r => ({ name: r.name, gap: -r.gapByService[selectedService] }))
+      .sort((a, b) => b.gap - a.gap);
   }, [efficiencyGapRaw, selectedService]);
 
   // ── Stat card detail modal ────────────────────────────────────────────────
@@ -1320,7 +1382,7 @@ export default function ProfessorAnalyticsDashboard() {
           destination: r.clinical_section_destination,
           status: !r.accepted_at ? "pending" : (r.referral_status || "ongoing"),
           created: fmtDate(r.created_at),
-          age: daysBetween(r.created_at, nowStr),
+          age: Math.max(0, daysBetween(r.created_at, nowStr) ?? 0),
         }));
       case "completed":
         return cardAccepted
@@ -1341,7 +1403,10 @@ export default function ProfessorAnalyticsDashboard() {
             if (!r.accepted_at) return false;
             const _mRs = r.referral_status?.toLowerCase();
             if (_mRs === "completed" || _mRs === "deferred" || _mRs === "blacklisted") return false;
-            const age = daysBetween(r.accepted_at, nowStr);
+            const startDate = overdueStartDate(r);
+            if (!startDate) return false;
+            if (new Date(startDate) > new Date()) return false;
+            const age = daysBetween(startDate, nowStr);
             return age !== null && age > OVERDUE_DAYS;
           })
           .map(r => ({
@@ -1350,7 +1415,7 @@ export default function ProfessorAnalyticsDashboard() {
             origin: r.clinical_section_origin,
             destination: r.clinical_section_destination,
             created: fmtDate(r.created_at),
-            daysOverdue: daysBetween(r.accepted_at, nowStr),
+            daysOverdue: daysBetween(overdueStartDate(r), nowStr),
             status: r.referral_status || "ongoing",
           }))
           .sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
@@ -1525,8 +1590,8 @@ export default function ProfessorAnalyticsDashboard() {
       created: r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
       accepted: r.accepted_at ? new Date(r.accepted_at).toLocaleDateString() : "—",
       acceptedBy: findAdvisee(r.accepted_by_user_id),
-      daysToAccept: daysBetween(r.created_at, r.accepted_at),
-      daysSinceCreated: daysBetween(r.created_at, nowStr),
+      daysToAccept: Math.max(0, daysBetween(r.created_at, r.accepted_at) ?? 0),
+      daysSinceCreated: Math.max(0, daysBetween(r.created_at, nowStr) ?? 0),
     }));
 
     const completedRows = acceptedByAdvisee
@@ -1547,7 +1612,10 @@ export default function ProfessorAnalyticsDashboard() {
         if (!r.accepted_at) return false;
         const _oRs = r.referral_status?.toLowerCase();
         if (_oRs === "completed" || _oRs === "deferred" || _oRs === "blacklisted") return false;
-        const age = daysBetween(r.accepted_at, nowStr);
+        const startDate = overdueStartDate(r);
+        if (!startDate) return false;
+        if (new Date(startDate) > new Date()) return false;
+        const age = daysBetween(startDate, nowStr);
         return age !== null && age > OVERDUE_DAYS;
       })
       .map(r => ({
@@ -1556,7 +1624,7 @@ export default function ProfessorAnalyticsDashboard() {
         origin: r.clinical_section_origin,
         destination: r.clinical_section_destination,
         created: r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
-        daysOverdue: daysBetween(r.accepted_at, nowStr),
+        daysOverdue: daysBetween(overdueStartDate(r), nowStr),
         status: r.referral_status || "ongoing",
       }));
 
@@ -1838,8 +1906,8 @@ export default function ProfessorAnalyticsDashboard() {
                   ))}
                 </div>
 
-                {/* Time period pills */}
-                <div className="flex gap-1.5 bg-white rounded-lg border-2 border-[#87c4d8]/30 p-1 shadow-sm">
+                {/* Unified time filter: preset pills + custom date range */}
+                <div className="flex items-center gap-0 bg-white rounded-lg border-2 border-[#87c4d8]/30 p-1 shadow-sm">
                   {(["week", "5weeks", "10weeks", "15weeks", "all"] as TimePeriod[]).map(p => (
                     <button
                       key={p}
@@ -1853,6 +1921,38 @@ export default function ProfessorAnalyticsDashboard() {
                       {PERIOD_LABELS[p]}
                     </button>
                   ))}
+
+                  {/* Divider */}
+                  <div className="w-px h-5 bg-[#87c4d8]/40 mx-1.5 flex-shrink-0" />
+
+                  {/* Date range inputs */}
+                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-all ${customRange ? "bg-secondary/10" : ""}`}>
+                    <CalendarIcon className={`h-3 w-3 flex-shrink-0 ${customRange ? "text-secondary" : "text-gray-400"}`} />
+                    <input
+                      type="date"
+                      value={customRange?.start || ""}
+                      onChange={e => setCustomRange(prev => ({ start: e.target.value, end: prev?.end || "" }))}
+                      className={`text-[10px] font-bold uppercase tracking-wide bg-transparent outline-none w-[88px] ${customRange?.start ? "text-secondary" : "text-gray-400"}`}
+                      title="Range start"
+                    />
+                    <span className="text-gray-300 text-[10px] font-bold">–</span>
+                    <input
+                      type="date"
+                      value={customRange?.end || ""}
+                      onChange={e => setCustomRange(prev => ({ start: prev?.start || "", end: e.target.value }))}
+                      className={`text-[10px] font-bold uppercase tracking-wide bg-transparent outline-none w-[88px] ${customRange?.end ? "text-secondary" : "text-gray-400"}`}
+                      title="Range end"
+                    />
+                    {customRange && (customRange.start || customRange.end) && (
+                      <button
+                        onClick={() => setCustomRange(null)}
+                        className="p-0.5 rounded hover:bg-gray-100 text-gray-400 hover:text-secondary transition-colors ml-0.5"
+                        title="Clear custom range"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Export buttons */}
@@ -1951,9 +2051,19 @@ export default function ProfessorAnalyticsDashboard() {
               );
             })()}
 
+            {/* ── Scope Banner ──────────────────────────────────────── */}
+            <div className="flex items-center gap-2 mb-4 px-4 py-2.5 rounded-lg bg-[#87c4d8]/10 border border-[#87c4d8]/25 animate-enter-delay-1">
+              <Users className="h-3.5 w-3.5 text-[#87c4d8]" />
+              <p className="text-[11px] text-secondary font-medium">
+                Showing data for <span className="font-bold">{loading ? "…" : allClinicians.length} clinician(s)</span> across all sections.
+                All metrics below reflect college-wide referral activity.
+              </p>
+            </div>
+
             {/* ── Summary Cards ────────────────────────────────────── */}
             {(() => {
               const pct = (n: number) => totalRefs > 0 ? ((n / totalRefs) * 100).toFixed(1) : "0";
+              const pctAcc = (n: number) => acceptedCount > 0 ? ((n / acceptedCount) * 100).toFixed(1) : "0";
               // Filter events by selected clinician if applicable
               const filteredEvents = selectedClinicianId 
                 ? allEvents.filter(e => e.user_id === selectedClinicianId)
@@ -1970,12 +2080,12 @@ export default function ProfessorAnalyticsDashboard() {
                   <StatCard icon={UserCheck}      label="Accepted"         value={loading ? "…" : String(acceptedCount)}                                    sub={loading ? "Accepted referrals" : `${((acceptedCount / totalRefs) * 100).toFixed(1)}% acceptance rate`}             color="#0EA5E9" onClick={() => setStatModal("accepted")} />
                   <StatCard icon={TrendingUp}     label="Completed"        value={loading ? "…" : String(completedCount)}                                     sub={loading ? "Completion rate" : `${completionRate}% completion rate`}                                                color="#2D7A4F" onClick={() => setStatModal("completed")} />
                   <StatCard icon={Hourglass}     label="Available"        value={loading ? "…" : String(availableCount)}                                     sub={loading ? "Awaiting acceptance" : `${pct(availableCount)}% available rate`}                                        color="#F59E0B" onClick={() => setStatModal("available")} />
-                  <StatCard icon={Repeat}       label="Re-referred"      value={loading ? "…" : String(rereferredCount)}                                     sub={loading ? "Re-referred referrals" : `${pct(rereferredCount)}% re-referral rate`}                                  color="#A855F7" onClick={() => setStatModal("rereferred")} />
+                  <StatCard icon={Repeat}       label="Re-referred"      value={loading ? "…" : String(rereferredCount)}                                     sub={loading ? "Re-referred referrals" : `${pctAcc(rereferredCount)}% re-referral rate`}                                  color="#A855F7" onClick={() => setStatModal("rereferred")} />
                   {/* Row 2 */}
-                  <StatCard icon={AlertTriangle} label="Overdue"          value={loading ? "…" : String(overdueCount)}                                       sub={loading ? `Pending > ${OVERDUE_DAYS} days` : `${pct(overdueCount)}% overdue rate`}                                color="#EF4444" onClick={() => setStatModal("overdue")} />
-                  <StatCard icon={Activity}     label="Ongoing"          value={loading ? "…" : String(ongoingCount)}                                        sub={loading ? "Currently in progress" : `${pct(ongoingCount)}% ongoing rate`}                                         color="#3B82F6" onClick={() => setStatModal("ongoing")} />
-                  <StatCard icon={Pause}         label="Deferred"         value={loading ? "…" : String(deferredCount)}                                      sub={loading ? "Deferred referrals" : `${pct(deferredCount)}% deferral rate`}                                          color="#F97316" onClick={() => setStatModal("deferred")} />
-                  <StatCard icon={Ban}          label="Blacklisted"      value={loading ? "…" : String(blacklistedCount)}                                   sub={loading ? "Blacklisted referrals" : `${pct(blacklistedCount)}% blacklist rate`}                                   color="#374151" onClick={() => setStatModal("blacklisted")} />
+                  <StatCard icon={AlertTriangle} label="Overdue"          value={loading ? "…" : String(overdueCount)}                                       sub={loading ? `Pending > ${OVERDUE_DAYS} days` : `${pctAcc(overdueCount)}% overdue rate`}                                color="#EF4444" onClick={() => setStatModal("overdue")} />
+                  <StatCard icon={Activity}     label="Ongoing"          value={loading ? "…" : String(ongoingCount)}                                        sub={loading ? "Currently in progress" : `${pctAcc(ongoingCount)}% ongoing rate`}                                         color="#3B82F6" onClick={() => setStatModal("ongoing")} />
+                  <StatCard icon={Pause}         label="Deferred"         value={loading ? "…" : String(deferredCount)}                                      sub={loading ? "Deferred referrals" : `${pctAcc(deferredCount)}% deferral rate`}                                          color="#F97316" onClick={() => setStatModal("deferred")} />
+                  <StatCard icon={Ban}          label="Blacklisted"      value={loading ? "…" : String(blacklistedCount)}                                   sub={loading ? "Blacklisted referrals" : `${pctAcc(blacklistedCount)}% blacklist rate`}                                   color="#374151" onClick={() => setStatModal("blacklisted")} />
                   <StatCard icon={Clock}        label="Avg. Acceptance"  value={loading ? "…" : (avgAcceptanceDays !== null ? `${avgAcceptanceDays}d` : "—")} sub="Created → Accepted"                                                                                           color="#3B82F6" />
                   <StatCard icon={TrendingUp}    label="Avg. Completion" value={loading ? "…" : (avgCompletionDays !== null ? `${avgCompletionDays}d` : "—")}  sub="Accepted → Completed"                                                                                         color="#059669" />
                 </div>
@@ -2043,7 +2153,7 @@ export default function ProfessorAnalyticsDashboard() {
                     </div>
                     {/* Legend */}
                     <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 px-1">
-                      {(["Completed", "Ongoing", "Pending", "Overdue", "MedAlert", "Deferred", "Blacklisted", "Re-referred"] as const).map(s => (
+                      {(["Completed", "Ongoing", "Overdue", "Deferred", "Blacklisted", "Re-referred"] as const).map(s => (
                         <div key={s} className="flex items-center gap-1">
                           <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS[s] }} />
                           <span className="text-[9px] text-gray-500 font-medium">{s === "MedAlert" ? "Med Alert" : s}</span>
@@ -2095,9 +2205,7 @@ export default function ProfessorAnalyticsDashboard() {
                               />
                               <Bar dataKey="Completed"  name="Completed"  stackId="a" fill={STATUS_COLORS.Completed}  radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Ongoing"    name="Ongoing"    stackId="a" fill={STATUS_COLORS.Ongoing}    radius={[0, 0, 0, 0]} />
-                              <Bar dataKey="Pending"    name="Pending"    stackId="a" fill={STATUS_COLORS.Pending}    radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Overdue"    name="Overdue"    stackId="a" fill={STATUS_COLORS.Overdue}    radius={[0, 0, 0, 0]} />
-                              <Bar dataKey="MedAlert"   name="Med Alert"  stackId="a" fill={STATUS_COLORS.MedAlert}   radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Deferred"   name="Deferred"   stackId="a" fill={STATUS_COLORS.Deferred}   radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Blacklisted" name="Blacklisted" stackId="a" fill={STATUS_COLORS.Blacklisted} radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Rereferred" name="Re-referred" stackId="a" fill={STATUS_COLORS["Re-referred"]} radius={[0, 4, 4, 0]} />
@@ -2294,14 +2402,15 @@ export default function ProfessorAnalyticsDashboard() {
                                 content={({ active, payload, label }: any) => {
                                   if (!active || !payload?.length) return null;
                                   const gap = payload[0]?.value ?? 0;
-                                  const isFast = gap <= 0;
+                                  const isFast = gap >= 0;
+                                  const realGap = -gap; // restore original sign for display
                                   const svcLabel = selectedService === "__all__" ? "all services" : selectedService;
                                   return (
                                     <div className="bg-white border-2 border-[#87c4d8]/30 rounded-lg shadow-lg px-3 py-2">
                                       <p className="text-[11px] font-bold text-secondary mb-0.5">{label}</p>
                                       <p className="text-[11px]" style={{ color: isFast ? "#22C55E" : "#EF4444" }}>
                                         {isFast ? "Efficiency Gain" : "Efficiency Lag"}:{" "}
-                                        <span className="font-bold">{gap > 0 ? "+" : ""}{gap}d</span>
+                                        <span className="font-bold">{realGap > 0 ? "+" : ""}{realGap}d</span>
                                       </p>
                                       <p className="text-[10px] text-gray-400">vs. avg for {svcLabel}</p>
                                     </div>
@@ -2313,7 +2422,7 @@ export default function ProfessorAnalyticsDashboard() {
                                 {displayed.map((entry, i) => (
                                   <Cell
                                     key={i}
-                                    fill={entry.gap <= 0 ? "#22C55E" : "#EF4444"}
+                                    fill={entry.gap >= 0 ? "#22C55E" : "#EF4444"}
                                     fillOpacity={Math.min(1, 0.45 + Math.abs(entry.gap) / 10)}
                                   />
                                 ))}
@@ -2433,7 +2542,7 @@ export default function ProfessorAnalyticsDashboard() {
                     </div>
                     {/* Legend */}
                     <div className="flex items-center gap-4 mb-2 px-1">
-                      {[{ label: "Referred", color: "#5B8AB8" }, { label: "Accepted", color: "#22C55E" }, { label: "Completed", color: "#059669" }].map(l => (
+                      {[{ label: "Referred", color: "#5B8AB8" }, { label: "Accepted", color: "#22C55E" }, { label: "Ongoing", color: "#3B82F6" }, { label: "Completed", color: "#059669" }].map(l => (
                         <div key={l.label} className="flex items-center gap-1">
                           <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: l.color }} />
                           <span className="text-[9px] text-gray-500 font-medium">{l.label}</span>
@@ -2477,6 +2586,7 @@ export default function ProfessorAnalyticsDashboard() {
                               />
                               <Bar dataKey="Referred"  name="Referred"  stackId="a" fill="#5B8AB8" radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Accepted"  name="Accepted"  stackId="a" fill="#22C55E" radius={[0, 0, 0, 0]} />
+                              <Bar dataKey="Ongoing"   name="Ongoing"   stackId="a" fill="#3B82F6" radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Completed" name="Completed" stackId="a" fill="#059669" radius={[0, 4, 4, 0]} />
                             </BarChart>
                           </ResponsiveContainer>
@@ -2991,15 +3101,18 @@ export default function ProfessorAnalyticsDashboard() {
                           const scale = max > 0 ? 100 / max : 0;
                           const refW = row.Referred * scale;
                           const accW = row.Accepted * scale;
+                          const ongW = row.Ongoing * scale;
                           const cmpW = row.Completed * scale;
                           return (
-                            <div key={row.service} title={`${row.service} — Referred: ${row.Referred}, Accepted: ${row.Accepted}, Completed: ${row.Completed}`}>
+                            <div key={row.service} title={`${row.service} — Referred: ${row.Referred}, Accepted: ${row.Accepted}, Ongoing: ${row.Ongoing}, Completed: ${row.Completed}`}>
                               <div className="flex items-center justify-between mb-0.5">
                                 <span className="text-[10px] font-semibold text-gray-700 truncate">{row.service}</span>
                                 <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
                                   <span className="text-[9px] font-bold text-[#F59E0B]">{row.Referred}</span>
                                   <span className="text-gray-300">/</span>
                                   <span className="text-[9px] font-bold text-[#3B82F6]">{row.Accepted}</span>
+                                  <span className="text-gray-300">/</span>
+                                  <span className="text-[9px] font-bold text-[#6366F1]">{row.Ongoing}</span>
                                   <span className="text-gray-300">/</span>
                                   <span className="text-[9px] font-bold text-[#22C55E]">{row.Completed}</span>
                                 </div>
@@ -3010,6 +3123,9 @@ export default function ProfessorAnalyticsDashboard() {
                                 </div>
                                 <div className="flex h-[5px] w-full rounded-full overflow-hidden bg-gray-100">
                                   <div className="bg-[#3B82F6] h-full rounded-full" style={{ width: `${accW}%` }} />
+                                </div>
+                                <div className="flex h-[5px] w-full rounded-full overflow-hidden bg-gray-100">
+                                  <div className="bg-[#6366F1] h-full rounded-full" style={{ width: `${ongW}%` }} />
                                 </div>
                                 <div className="flex h-[5px] w-full rounded-full overflow-hidden bg-gray-100">
                                   <div className="bg-[#22C55E] h-full rounded-full" style={{ width: `${cmpW}%` }} />
@@ -3024,6 +3140,7 @@ export default function ProfessorAnalyticsDashboard() {
                     <div className="flex items-center justify-center gap-4 mt-2 pt-2 border-t border-gray-100">
                       <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#F59E0B]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Referred</span></div>
                       <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#3B82F6]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Accepted</span></div>
+                      <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#6366F1]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Ongoing</span></div>
                       <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#22C55E]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Completed</span></div>
                     </div>
                   </div>

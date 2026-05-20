@@ -53,6 +53,8 @@ const STATUS_COLORS: Record<string, string> = {
   Deferred:    "#EF4444",
   Blacklisted: "#374151",
   "Re-referred": "#A855F7",
+  Overdue:     "#DC2626",
+  MedAlert:    "#EC4899",
 };
 
 function ChartTooltip({ active, payload, label }: any) {
@@ -91,10 +93,36 @@ function daysBetween(a: string | null, b: string | null): number | null {
   return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
+function overdueStartDate(r: { tentative_appointment_schedule?: string | null }): string | null {
+  return r.tentative_appointment_schedule ?? null;
+}
+
 const OVERDUE_DAYS = 7;
 const PERIOD_LABELS: Record<TimePeriod, string> = {
   week: "7 Days", "5weeks": "5 Weeks", "10weeks": "10 Weeks", "15weeks": "15 Weeks", all: "All Time",
 };
+
+function getBucketKey(d: Date, period: TimePeriod): string {
+  if (period === "all") {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  } else if (period === "week") {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  } else {
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d.getFullYear(), d.getMonth(), diff);
+    return `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, "0")}-${String(mon.getDate()).padStart(2, "0")}`;
+  }
+}
+
+function formatBucketLabel(key: string, period: TimePeriod): string {
+  if (period === "all") {
+    const [y, m] = key.split("-");
+    return `${new Date(+y, +m - 1).toLocaleString("en-US", { month: "short" })} '${y.slice(-2)}`;
+  }
+  const [y, m, day] = key.split("-");
+  return new Date(+y, +m - 1, +day).toLocaleString("en-US", { month: "short", day: "numeric" });
+}
 
 // ─── Stat Card ───────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, label, value, sub, color, onClick }: {
@@ -350,6 +378,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>("all");
+  const [customRange, setCustomRange] = useState<{ start: string; end: string } | null>(null);
 
   const [selectedSection, setSelectedSection] = useState<string>("all");
   const [clinicianSearch, setClinicianSearch] = useState("");
@@ -379,25 +408,41 @@ export default function ClinicalAdminAnalyticsDashboard() {
   // ── Scope helpers ───────────────────────────────────────────────────────────
   const clinicianIds = useMemo(() => new Set(clinicians.map(a => a.id)), [clinicians]);
 
-  const periodStart = useMemo(() => getTimePeriodStart(timePeriod), [timePeriod]);
+  const periodStart = useMemo(() => {
+    if (customRange?.start) return new Date(customRange.start);
+    return new Date(2000, 0, 1);
+  }, [customRange]);
+
+  const periodEnd = useMemo(() => {
+    if (customRange?.end) {
+      const d = new Date(customRange.end);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    }
+    return null;
+  }, [customRange]);
 
   // Referrals CREATED by clinicians (Total Referrals, Overdue)
   const createdByClinician = useMemo(() => {
     return referrals.filter(r => {
       if (clinicianIds.size > 0 && !clinicianIds.has(r.user_id)) return false;
-      if (new Date(r.created_at) < periodStart) return false;
+      const created = new Date(r.created_at);
+      if (created < periodStart) return false;
+      if (periodEnd && created > periodEnd) return false;
       return true;
     });
-  }, [referrals, clinicianIds, periodStart]);
+  }, [referrals, clinicianIds, periodStart, periodEnd]);
 
   // Referrals ACCEPTED by clinicians (Completed, Avg Acceptance, Status chart)
   const acceptedByClinician = useMemo(() => {
     return referrals.filter(r => {
       if (clinicianIds.size > 0 && !clinicianIds.has(r.accepted_by_user_id || "")) return false;
-      if (new Date(r.created_at) < periodStart) return false;
+      const created = new Date(r.created_at);
+      if (created < periodStart) return false;
+      if (periodEnd && created > periodEnd) return false;
       return true;
     });
-  }, [referrals, clinicianIds, periodStart]);
+  }, [referrals, clinicianIds, periodStart, periodEnd]);
 
   // ── Unfiltered (all-time) variants ───────────────────────────────────────
   // The summary stat cards must always reflect the full college-wide picture
@@ -411,37 +456,41 @@ export default function ClinicalAdminAnalyticsDashboard() {
   }, [referrals, clinicianIds]);
 
   // ── Computed stat values ──────────────────────────────────────────────────
-  // NOTE: Stat cards intentionally use the *All variants so the period pills
-  // (7 days / N weeks / All Time) above the charts do not affect them.
-  const totalRefs = createdByClinicianAll.length;
+  // Stat cards use the period-filtered variants so the time filter affects them.
+  const totalRefs = createdByClinician.length;
 
   const completedCount = useMemo(
-    () => acceptedByClinicianAll.filter(r => r.referral_status === "completed").length,
-    [acceptedByClinicianAll]
+    () => acceptedByClinician.filter(r => r.referral_status === "completed").length,
+    [acceptedByClinician]
   );
 
-  const completionRate = acceptedByClinicianAll.length > 0
-    ? ((completedCount / acceptedByClinicianAll.length) * 100).toFixed(0) : "0";
+  const completionRate = acceptedByClinician.length > 0
+    ? ((completedCount / acceptedByClinician.length) * 100).toFixed(0) : "0";
 
   const avgCompletionDays = useMemo(() => {
     const diffs: number[] = [];
-    createdByClinicianAll.forEach(r => {
+    createdByClinician.forEach(r => {
       if (r.referral_status !== "completed") return;
       const d = daysBetween(r.accepted_at, r.referral_status_changed_at);
       if (d !== null && d >= 0) diffs.push(d);
     });
     if (diffs.length === 0) return null;
     return +(diffs.reduce((s, v) => s + v, 0) / diffs.length).toFixed(1);
-  }, [createdByClinicianAll]);
+  }, [createdByClinician]);
 
   const overdueCount = useMemo(() => {
     const now = new Date().toISOString();
-    return createdByClinicianAll.filter(r => {
-      if (r.referral_status && r.referral_status !== "ongoing") return false;
-      const age = daysBetween(r.created_at, now);
-      return age !== null && age > OVERDUE_DAYS && (!r.accepted_at || r.status === "pending");
+    return acceptedByClinician.filter(r => {
+      if (!r.accepted_at) return false;
+      const rs = r.referral_status?.toLowerCase();
+      if (rs === "completed" || rs === "deferred" || rs === "blacklisted") return false;
+      const startDate = overdueStartDate(r);
+      if (!startDate) return false;
+      if (new Date(startDate) > new Date()) return false;
+      const age = daysBetween(startDate, now);
+      return age !== null && age > OVERDUE_DAYS;
     }).length;
-  }, [createdByClinicianAll]);
+  }, [acceptedByClinician]);
 
   // ── Referral Status — based on ACCEPTED referrals ─────────────────────────
   const statusData = useMemo(() => {
@@ -462,23 +511,17 @@ export default function ClinicalAdminAnalyticsDashboard() {
       .map(([name, value]) => ({ name, value }));
   }, [acceptedByClinician]);
 
-  // ── Referrals Over Time — monthly count of accepted referrals ──────
+  // ── Referrals Over Time — interval driven by timePeriod ──────────────────
   const timelineData = useMemo(() => {
     const buckets: Record<string, number> = {};
     acceptedByClinician.forEach(r => {
-      const d = new Date(r.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const key = getBucketKey(new Date(r.created_at), timePeriod);
       buckets[key] = (buckets[key] || 0) + 1;
     });
     return Object.entries(buckets)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, count]) => {
-        const [y, m] = month.split("-");
-        const monthName = new Date(+y, +m - 1).toLocaleString("en-US", { month: "short" });
-        const label = `${monthName} '${y.slice(-2)}`;
-        return { month: label, referrals: count };
-      });
-  }, [acceptedByClinician]);
+      .map(([key, count]) => ({ month: formatBucketLabel(key, timePeriod), referrals: count }));
+  }, [acceptedByClinician, timePeriod]);
 
   // ── Departmental Net Flow ─────────────────────────────────────────
   const netFlowData = useMemo(() => {
@@ -579,10 +622,13 @@ export default function ClinicalAdminAnalyticsDashboard() {
       const clnName = cln ? `${cln.first_name} ${cln.last_name?.[0] || ""}.` : (r.accepted_by || "Unknown");
 
       if ((!r.referral_status || r.referral_status === "ongoing" || r.referral_status === "pending") && r.accepted_at) {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) {
-          overdue++;
-          alertList.push({ clinician: clnName, type: "Overdue", detail: `${age}d since accepted`, color: "#EF4444" });
+        const startDate = overdueStartDate(r);
+        if (startDate && new Date(startDate) <= new Date()) {
+          const age = daysBetween(startDate, now);
+          if (age !== null && age > OVERDUE_DAYS) {
+            overdue++;
+            alertList.push({ clinician: clnName, type: "Overdue", detail: `${age}d since appointment`, color: "#EF4444" });
+          }
         }
       }
       if (r.medical_alert && r.medical_alert !== "None" && r.medical_alert !== "none") {
@@ -652,7 +698,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
     return professors.map(prof => {
       // Find advisees for this professor
       const adviseeIds = new Set(
-        allProfiles.filter(p => p.adviser_id === prof.id).map(p => p.id)
+        allProfiles.filter(p => p.adviser_ids?.includes(prof.id)).map(p => p.id)
       );
       // Get referrals created by this professor's advisees within period
       const adviseeReferrals = referrals.filter(r =>
@@ -664,7 +710,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
         const rs = r.referral_status?.toLowerCase();
         if (rs === "completed") {
           completed++;
-        } else if (!r.accepted_at && daysBetween(r.created_at, now.toISOString())! > OVERDUE_DAYS) {
+        } else if (r.accepted_at && (() => { const sd = overdueStartDate(r); return sd && new Date(sd) <= now && (daysBetween(sd, now.toISOString()) ?? 0) > OVERDUE_DAYS; })()) {
           overdue++;
         } else if (!r.accepted_at || rs === "ongoing") {
           pending++;
@@ -709,9 +755,15 @@ export default function ClinicalAdminAnalyticsDashboard() {
         deletionRequests++;
         deletionRequestList.push({ chart: r.chart_number, clinician: name, reason: r.deletion_request_reason || "—" });
       }
-      if (!r.accepted_at && daysBetween(r.created_at, now.toISOString())! > OVERDUE_DAYS) {
-        overdue++;
-        overdueList.push({ chart: r.chart_number, clinician: name, days: daysBetween(r.created_at, now.toISOString())! });
+      if (r.accepted_at) {
+        const sd = overdueStartDate(r);
+        if (sd && new Date(sd) <= now) {
+          const age = daysBetween(sd, now.toISOString());
+          if (age !== null && age > OVERDUE_DAYS) {
+            overdue++;
+            overdueList.push({ chart: r.chart_number, clinician: name, days: age });
+          }
+        }
       }
     });
 
@@ -763,14 +815,15 @@ export default function ClinicalAdminAnalyticsDashboard() {
   // ── Referral Treatment — Referred / Accepted / Completed per discipline ──
   const referralTreatmentData = useMemo(() => {
     const filtered = referrals.filter(r => new Date(r.created_at) >= periodStart);
-    const map: Record<string, { Referred: number; Accepted: number; Completed: number }> = {};
+    const map: Record<string, { Referred: number; Accepted: number; Ongoing: number; Completed: number }> = {};
     filtered.forEach(r => {
       const discipline = r.clinical_discipline_destination || r.clinical_discipline_origin || r.clinical_section_destination || r.clinical_section_origin;
       if (!discipline) return;
-      if (!map[discipline]) map[discipline] = { Referred: 0, Accepted: 0, Completed: 0 };
+      if (!map[discipline]) map[discipline] = { Referred: 0, Accepted: 0, Ongoing: 0, Completed: 0 };
       map[discipline].Referred++;
       const rs = r.referral_status?.toLowerCase();
       if (rs && ["accepted", "ongoing", "completed", "overdue"].includes(rs)) map[discipline].Accepted++;
+      if (!rs || rs === "ongoing") map[discipline].Ongoing++;
       if (rs === "completed") map[discipline].Completed++;
     });
     return Object.entries(map)
@@ -886,15 +939,28 @@ export default function ClinicalAdminAnalyticsDashboard() {
   // takes precedence over referral_status, so an approved re-referral counts
   // as Re-referred regardless of its current status.
   const performanceData = useMemo(() => {
-    const map: Record<string, { name: string; Completed: number; Ongoing: number; Deferred: number; Blacklisted: number; Pending: number; Rereferred: number; total: number }> = {};
+    const map: Record<string, { name: string; Completed: number; Ongoing: number; Deferred: number; Blacklisted: number; Pending: number; Rereferred: number; Overdue: number; MedAlert: number; total: number }> = {};
+    const now = new Date();
     acceptedByClinician.forEach(r => {
       const uid = r.accepted_by_user_id || "";
+      if (!uid) return;
       if (!map[uid]) {
         const adv = clinicians.find(a => a.id === uid);
         map[uid] = {
           name: adv ? `${adv.first_name} ${adv.last_name || ""}`.trim() : (r.accepted_by || "Unknown"),
-          Completed: 0, Ongoing: 0, Deferred: 0, Blacklisted: 0, Pending: 0, Rereferred: 0, total: 0,
+          Completed: 0, Ongoing: 0, Deferred: 0, Blacklisted: 0, Pending: 0, Rereferred: 0, Overdue: 0, MedAlert: 0, total: 0,
         };
+      }
+      const _perfRs = r.referral_status?.toLowerCase();
+      if (r.accepted_at && _perfRs !== "completed" && _perfRs !== "deferred" && _perfRs !== "blacklisted") {
+        const _perfSd = overdueStartDate(r);
+        if (_perfSd && new Date(_perfSd) <= new Date(now)) {
+          const age = daysBetween(_perfSd, now.toISOString());
+          if (age !== null && age > OVERDUE_DAYS) map[uid].Overdue++;
+        }
+      }
+      if (r.medical_alert && r.medical_alert !== "None" && r.medical_alert !== "none") {
+        map[uid].MedAlert++;
       }
       if (r.rerefer_request_status === "approved") {
         map[uid].Rereferred++;
@@ -928,9 +994,12 @@ export default function ClinicalAdminAnalyticsDashboard() {
       if (!r.accepted_at) {
         map[section].Pending++;
       } else {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) map[section].Overdue++;
-        else map[section].Ongoing++;
+        const startDate = overdueStartDate(r);
+        if (startDate && new Date(startDate) <= new Date(now) && (daysBetween(startDate, now) ?? 0) > OVERDUE_DAYS) {
+          map[section].Overdue++;
+        } else {
+          map[section].Ongoing++;
+        }
       }
     });
     return Object.entries(map)
@@ -1141,7 +1210,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
   }, [referrals]);
 
   const txStatusPerTreatmentData = useMemo(() => {
-    const map: Record<string, { Referred: number; Accepted: number; Completed: number }> = {};
+    const map: Record<string, { Referred: number; Accepted: number; Ongoing: number; Completed: number }> = {};
     const filtered = referrals.filter(r => {
       if (new Date(r.created_at) < periodStart) return false;
       return true;
@@ -1149,13 +1218,16 @@ export default function ClinicalAdminAnalyticsDashboard() {
     filtered.forEach(r => {
       const svc = r.treatment_service_destination || "Unspecified";
       if (txStatusFilter !== "__all__" && svc !== txStatusFilter) return;
-      if (!map[svc]) map[svc] = { Referred: 0, Accepted: 0, Completed: 0 };
+      if (!map[svc]) map[svc] = { Referred: 0, Accepted: 0, Ongoing: 0, Completed: 0 };
       // Every referral counts as "Referred"
       map[svc].Referred++;
       // If it has been accepted (accepted_at exists), count as Accepted
       if (r.accepted_at) map[svc].Accepted++;
+      // If ongoing
+      const rs = r.referral_status?.toLowerCase();
+      if (!rs || rs === "ongoing") { if (r.accepted_at) map[svc].Ongoing++; }
       // If it is completed, count as Completed
-      if (r.referral_status === "completed") map[svc].Completed++;
+      if (rs === "completed") map[svc].Completed++;
     });
     return Object.entries(map)
       .map(([service, v]) => ({ service, ...v }))
@@ -1204,10 +1276,13 @@ export default function ClinicalAdminAnalyticsDashboard() {
       }
 
       // Exception/alert columns (additive — can overlap with status columns)
-      // Overdue = accepted, not completed, > 7 days since acceptance
+      // Overdue = accepted, has appointment, appointment passed, >7 days since appointment
       if (r.accepted_at && rs !== "completed") {
-        const age = daysBetween(r.accepted_at, now);
-        if (age !== null && age > OVERDUE_DAYS) { e.Overdue++; e.total++; e.details.Overdue.push({ chart: r.chart_number, detail: `${age}d overdue` }); }
+        const startDate = overdueStartDate(r);
+        if (startDate && new Date(startDate) <= new Date(now)) {
+          const age = daysBetween(startDate, now);
+          if (age !== null && age > OVERDUE_DAYS) { e.Overdue++; e.total++; e.details.Overdue.push({ chart: r.chart_number, detail: `${age}d overdue` }); }
+        }
       }
       if (r.medical_alert && r.medical_alert !== "None" && r.medical_alert !== "none") { e.MedAlert++; e.total++; e.details.MedAlert.push({ chart: r.chart_number, detail: r.medical_alert }); }
       if (r.rerefer_request_status === "approved") { e.Rereferred++; e.total++; e.details.Rereferred.push({ chart: r.chart_number, detail: "Re-referred" }); }
@@ -1218,43 +1293,43 @@ export default function ClinicalAdminAnalyticsDashboard() {
 
   // ── Stat card detail modal ────────────────────────────────────────────────
   const availableCount = useMemo(
-    () => createdByClinicianAll.filter(r => r.accepted_by === "None" || !r.accepted_at).length,
-    [createdByClinicianAll]
+    () => createdByClinician.filter(r => r.accepted_by === "None" || !r.accepted_at).length,
+    [createdByClinician]
   );
-  const ongoingCount = useMemo(
-    () => createdByClinicianAll.filter(r => {
-      if (r.accepted_by === "None" || !r.accepted_at) return false;
+  const ongoingCount = useMemo(() => {
+    const now = new Date().toISOString();
+    return acceptedByClinician.filter(r => {
       const rs = r.referral_status?.toLowerCase();
-      return !rs || rs === "ongoing";
-    }).length,
-    [createdByClinicianAll]
-  );
+      if (!rs && !r.accepted_at) return false;
+      if (rs && rs !== "ongoing") return false;
+      const startDate = overdueStartDate(r);
+      if (startDate && new Date(startDate) <= new Date() && (daysBetween(startDate, now) ?? 0) > OVERDUE_DAYS) return false;
+      return true;
+    }).length;
+  }, [acceptedByClinician]);
   const deferredCount = useMemo(
-    () => createdByClinicianAll.filter(r => r.referral_status === "deferred").length,
-    [createdByClinicianAll]
+    () => acceptedByClinician.filter(r => r.referral_status === "deferred").length,
+    [acceptedByClinician]
   );
   const blacklistedCount = useMemo(
-    () => createdByClinicianAll.filter(r => r.referral_status === "blacklisted").length,
-    [createdByClinicianAll]
+    () => acceptedByClinician.filter(r => r.referral_status === "blacklisted").length,
+    [acceptedByClinician]
   );
   const rereferredCount = useMemo(
-    () => createdByClinicianAll.filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed").length,
-    [createdByClinicianAll]
+    () => acceptedByClinician.filter(r => r.rerefer_request_status === "approved" || r.rerefer_request_status === "completed").length,
+    [acceptedByClinician]
   );
   const acceptedCount = useMemo(
-    () => createdByClinicianAll.filter(r => r.accepted_by !== "None" && r.accepted_at).length,
-    [createdByClinicianAll]
+    () => acceptedByClinician.filter(r => r.accepted_by !== "None" && r.accepted_at).length,
+    [acceptedByClinician]
   );
   const recentlyCreatedCount = useMemo(
     () => {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      return createdByClinicianAll.filter(r => new Date(r.created_at) >= sevenDaysAgo).length;
+      return createdByClinician.filter(r => new Date(r.created_at) >= sevenDaysAgo).length;
     },
-    [createdByClinicianAll]
-  );
-    () => createdByClinicianAll.filter(r => r.accepted_by !== "None" && r.accepted_at).length,
-    [createdByClinicianAll]
+    [createdByClinician]
   );
 
   const [statModal, setStatModal] = useState<StatModalType>(null);
@@ -1299,9 +1374,13 @@ export default function ClinicalAdminAnalyticsDashboard() {
       case "overdue":
         return createdByClinicianAll
           .filter(r => {
+            if (!r.accepted_at) return false;
             if (r.referral_status && r.referral_status !== "ongoing") return false;
-            const age = daysBetween(r.created_at, nowStr);
-            return age !== null && age > OVERDUE_DAYS && (!r.accepted_at || r.status === "pending");
+            const startDate = overdueStartDate(r);
+            if (!startDate) return false;
+            if (new Date(startDate) > new Date()) return false;
+            const age = daysBetween(startDate, nowStr);
+            return age !== null && age > OVERDUE_DAYS;
           })
           .map(r => ({
             chart: r.chart_number,
@@ -1309,8 +1388,8 @@ export default function ClinicalAdminAnalyticsDashboard() {
             origin: r.clinical_section_origin,
             destination: r.clinical_section_destination,
             created: fmtDate(r.created_at),
-            daysOverdue: daysBetween(r.created_at, nowStr),
-            status: !r.accepted_at ? "pending" : (r.referral_status || "ongoing"),
+            daysOverdue: daysBetween(overdueStartDate(r), nowStr),
+            status: r.referral_status || "ongoing",
           }))
           .sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
       case "recentlyCreated": {
@@ -1488,9 +1567,13 @@ export default function ClinicalAdminAnalyticsDashboard() {
 
     const overdueRows = createdByClinician
       .filter(r => {
+        if (!r.accepted_at) return false;
         if (r.referral_status && r.referral_status !== "ongoing") return false;
-        const age = daysBetween(r.created_at, nowStr);
-        return age !== null && age > OVERDUE_DAYS && (!r.accepted_at || r.status === "pending");
+        const startDate = overdueStartDate(r);
+        if (!startDate) return false;
+        if (new Date(startDate) > new Date()) return false;
+        const age = daysBetween(startDate, nowStr);
+        return age !== null && age > OVERDUE_DAYS;
       })
       .map(r => ({
         chart: r.chart_number,
@@ -1498,8 +1581,8 @@ export default function ClinicalAdminAnalyticsDashboard() {
         origin: r.clinical_section_origin,
         destination: r.clinical_section_destination,
         created: r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
-        daysOverdue: daysBetween(r.created_at, nowStr),
-        status: !r.accepted_at ? "pending" : (r.referral_status || "ongoing"),
+        daysOverdue: daysBetween(overdueStartDate(r), nowStr),
+        status: r.referral_status || "ongoing",
       }));
 
     const slaRows = slaData.map(d => [d.month, d.compliance, d.compliant, d.total]);
@@ -1747,22 +1830,68 @@ export default function ClinicalAdminAnalyticsDashboard() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                {/* Export buttons */}
-                <div className="flex gap-1">
-                  <button
-                    onClick={handleExportExcel}
-                    disabled={exporting}
-                    className={`p-2 rounded-lg border-2 border-[#87c4d8]/30 bg-white transition-all shadow-sm ${exporting ? 'opacity-50 cursor-wait' : 'hover:bg-green-50 hover:border-green-300 text-gray-400 hover:text-green-600'}`}
-                    title={exporting ? "Generating Excel…" : "Export to Excel"}
-                  >
-                    {exporting ? (
-                      <svg className="h-4 w-4 animate-spin text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                    ) : (
-                      <FileSpreadsheet className="h-4 w-4" />
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {/* Unified time filter: preset pills + custom date range */}
+                <div className="flex items-center gap-0 bg-white rounded-lg border-2 border-[#87c4d8]/30 p-1 shadow-sm">
+                  {(["week", "5weeks", "10weeks", "15weeks", "all"] as TimePeriod[]).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setTimePeriod(p)}
+                      className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
+                        timePeriod === p
+                          ? "bg-secondary text-white shadow"
+                          : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                      }`}
+                    >
+                      {PERIOD_LABELS[p]}
+                    </button>
+                  ))}
+
+                  {/* Divider */}
+                  <div className="w-px h-5 bg-[#87c4d8]/40 mx-1.5 flex-shrink-0" />
+
+                  {/* Date range inputs */}
+                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-all ${customRange ? "bg-secondary/10" : ""}`}>
+                    <CalendarIcon className={`h-3 w-3 flex-shrink-0 ${customRange ? "text-secondary" : "text-gray-400"}`} />
+                    <input
+                      type="date"
+                      value={customRange?.start || ""}
+                      onChange={e => setCustomRange(prev => ({ start: e.target.value, end: prev?.end || "" }))}
+                      className={`text-[10px] font-bold uppercase tracking-wide bg-transparent outline-none w-[88px] ${customRange?.start ? "text-secondary" : "text-gray-400"}`}
+                      title="Range start"
+                    />
+                    <span className="text-gray-300 text-[10px] font-bold">–</span>
+                    <input
+                      type="date"
+                      value={customRange?.end || ""}
+                      onChange={e => setCustomRange(prev => ({ start: prev?.start || "", end: e.target.value }))}
+                      className={`text-[10px] font-bold uppercase tracking-wide bg-transparent outline-none w-[88px] ${customRange?.end ? "text-secondary" : "text-gray-400"}`}
+                      title="Range end"
+                    />
+                    {customRange && (customRange.start || customRange.end) && (
+                      <button
+                        onClick={() => setCustomRange(null)}
+                        className="p-0.5 rounded hover:bg-gray-100 text-gray-400 hover:text-secondary transition-colors ml-0.5"
+                        title="Clear custom range"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
                     )}
-                  </button>
+                  </div>
                 </div>
+                {/* Export button */}
+                <button
+                  onClick={handleExportExcel}
+                  disabled={exporting}
+                  className={`p-2 rounded-lg border-2 border-[#87c4d8]/30 bg-white transition-all shadow-sm ${exporting ? 'opacity-50 cursor-wait' : 'hover:bg-green-50 hover:border-green-300 text-gray-400 hover:text-green-600'}`}
+                  title={exporting ? "Generating Excel…" : "Export to Excel"}
+                >
+                  {exporting ? (
+                    <svg className="h-4 w-4 animate-spin text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -1777,25 +1906,31 @@ export default function ClinicalAdminAnalyticsDashboard() {
 
             {/* ── Summary Cards ────────────────────────────────────── */}
             {/* Referral Statistics Section */}
+            {(() => {
+              const pct = (n: number) => totalRefs > 0 ? ((n / totalRefs) * 100).toFixed(1) : "0";
+              const pctAcc = (n: number) => acceptedCount > 0 ? ((n / acceptedCount) * 100).toFixed(1) : "0";
+              return (
             <div className="mb-2">
               <h3 className="text-xs font-bold text-secondary uppercase tracking-wide mb-3 px-1">Referral Statistics</h3>
               <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-4 animate-enter-delay-2">
-                {/* Row 1: Most Used / Active Referrals */}
-                <StatCard icon={TrendingUp}     label="Completed"        value={loading ? "…" : String(completedCount)}                                     sub={loading ? "Completion rate" : `${completionRate}% completion rate`}           color="#2D7A4F" onClick={() => setStatModal("completed")} />
-                <StatCard icon={UserCheck}      label="Accepted"         value={loading ? "…" : String(acceptedCount)}                                    sub={loading ? "Accepted referrals" : `${((acceptedCount / totalRefs) * 100).toFixed(1)}% acceptance rate`}             color="#0EA5E9" onClick={() => setStatModal("accepted")} />
-                <StatCard icon={Activity}        label="Ongoing"          value={loading ? "…" : String(ongoingCount)}                                        sub="Currently in progress"                                                       color="#3B82F6" onClick={() => setStatModal("ongoing")} />
-                <StatCard icon={AlertTriangle}  label="Overdue"          value={loading ? "…" : String(overdueCount)}                                       sub={`Pending > ${OVERDUE_DAYS} days`}                                            color="#EF4444" onClick={() => setStatModal("overdue")} />
-                <StatCard icon={Hourglass}      label="Available"        value={loading ? "…" : String(availableCount)}                                     sub="Awaiting acceptance"                                                         color="#F59E0B" onClick={() => setStatModal("available")} />
-                <StatCard icon={FileText}       label="Total Referrals"  value={loading ? "…" : String(totalRefs)}                                          sub="All clinicians' referrals"                                                  color="#5B8AB8" onClick={() => setStatModal("total")} />
-                {/* Row 2: Status Issues & Performance Metrics */}
-                <StatCard icon={FilePlus}       label="Recently Created" value={loading ? "…" : String(recentlyCreatedCount)}                                 sub={loading ? "Last 7 days" : `${((recentlyCreatedCount / totalRefs) * 100).toFixed(1)}% of total`}               color="#10B981" onClick={() => setStatModal("recentlyCreated")} />
-                <StatCard icon={Repeat}         label="Re-referred"      value={loading ? "…" : String(rereferredCount)}                                     sub="Re-referred referrals"                                                       color="#A855F7" onClick={() => setStatModal("rereferred")} />
-                <StatCard icon={Pause}          label="Deferred"         value={loading ? "…" : String(deferredCount)}                                      sub="Deferred referrals"                                                          color="#F97316" onClick={() => setStatModal("deferred")} />
-                <StatCard icon={Ban}            label="Blacklisted"      value={loading ? "…" : String(blacklistedCount)}                                   sub="Blacklisted referrals"                                                       color="#374151" onClick={() => setStatModal("blacklisted")} />
-                <StatCard icon={TrendingUp}     label="Avg. Completion" value={loading ? "…" : (avgCompletionDays !== null ? `${avgCompletionDays}d` : "—")}  sub="Accepted → Completed"                                                       color="#059669" />
-                <StatCard icon={Clock}          label="Avg. Acceptance"  value={loading ? "…" : (avgAcceptanceDays !== null ? `${avgAcceptanceDays}d` : "—")} sub="Created → Accepted"                                                         color="#3B82F6" />
+                {/* Row 1 */}
+                <StatCard icon={FileText}       label="Total Referrals"  value={loading ? "…" : String(totalRefs)}                                          sub="All clinicians' referrals"                                                                                            color="#5B8AB8" onClick={() => setStatModal("total")} />
+                <StatCard icon={FilePlus}       label="Recently Created" value={loading ? "…" : String(recentlyCreatedCount)}                                 sub={loading ? "Last 7 days" : `${((recentlyCreatedCount / totalRefs) * 100).toFixed(1)}% of total`}                 color="#10B981" onClick={() => setStatModal("recentlyCreated")} />
+                <StatCard icon={UserCheck}      label="Accepted"         value={loading ? "…" : String(acceptedCount)}                                    sub={loading ? "Accepted referrals" : `${((acceptedCount / totalRefs) * 100).toFixed(1)}% acceptance rate`}               color="#0EA5E9" onClick={() => setStatModal("accepted")} />
+                <StatCard icon={TrendingUp}     label="Completed"        value={loading ? "…" : String(completedCount)}                                     sub={loading ? "Completion rate" : `${completionRate}% completion rate`}             color="#2D7A4F" onClick={() => setStatModal("completed")} />
+                <StatCard icon={Hourglass}      label="Available"        value={loading ? "…" : String(availableCount)}                                     sub={loading ? "Awaiting acceptance" : `${pct(availableCount)}% available rate`}    color="#F59E0B" onClick={() => setStatModal("available")} />
+                <StatCard icon={Repeat}         label="Re-referred"      value={loading ? "…" : String(rereferredCount)}                                     sub={loading ? "Re-referred referrals" : `${pctAcc(rereferredCount)}% re-referral rate`} color="#A855F7" onClick={() => setStatModal("rereferred")} />
+                {/* Row 2 */}
+                <StatCard icon={AlertTriangle}  label="Overdue"          value={loading ? "…" : String(overdueCount)}                                       sub={loading ? `Pending > ${OVERDUE_DAYS} days` : `${pctAcc(overdueCount)}% overdue rate`}  color="#EF4444" onClick={() => setStatModal("overdue")} />
+                <StatCard icon={Activity}       label="Ongoing"          value={loading ? "…" : String(ongoingCount)}                                        sub={loading ? "Currently in progress" : `${pctAcc(ongoingCount)}% ongoing rate`}       color="#3B82F6" onClick={() => setStatModal("ongoing")} />
+                <StatCard icon={Pause}          label="Deferred"         value={loading ? "…" : String(deferredCount)}                                      sub={loading ? "Deferred referrals" : `${pctAcc(deferredCount)}% deferral rate`}         color="#F97316" onClick={() => setStatModal("deferred")} />
+                <StatCard icon={Ban}            label="Blacklisted"      value={loading ? "…" : String(blacklistedCount)}                                   sub={loading ? "Blacklisted referrals" : `${pctAcc(blacklistedCount)}% blacklist rate`}   color="#374151" onClick={() => setStatModal("blacklisted")} />
+                <StatCard icon={Clock}          label="Avg. Acceptance"  value={loading ? "…" : (avgAcceptanceDays !== null ? `${avgAcceptanceDays}d` : "—")} sub="Created → Accepted"                                                           color="#3B82F6" />
+                <StatCard icon={TrendingUp}     label="Avg. Completion"  value={loading ? "…" : (avgCompletionDays !== null ? `${avgCompletionDays}d` : "—")} sub="Accepted → Completed"                                                         color="#059669" />
               </div>
             </div>
+              );
+            })()}
 
             {/* Event Statistics Section */}
             <div className="mb-6">
@@ -1813,31 +1948,6 @@ export default function ClinicalAdminAnalyticsDashboard() {
             {/* ── Divider between stat cards and charts ── */}
             <div className="h-px bg-secondary/20 mb-4" />
 
-            {/* ── Chart-scope time-period filter ──
-                Sits between the divider and the first chart row. Only the
-                charts respond to this; the summary stat cards above always
-                reflect the all-time totals. */}
-            <div className="flex items-center justify-between gap-3 mb-4 animate-enter-delay-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Chart Time Period
-                <span className="normal-case font-normal text-gray-400/80 ml-1">— filters charts only</span>
-              </p>
-              <div className="flex gap-1.5 bg-white rounded-lg border-2 border-[#87c4d8]/30 p-1 shadow-sm">
-                {(["week", "5weeks", "10weeks", "15weeks", "all"] as TimePeriod[]).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => setTimePeriod(p)}
-                    className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wide transition-all ${
-                      timePeriod === p
-                        ? "bg-secondary text-white shadow"
-                        : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                    }`}
-                  >
-                    {PERIOD_LABELS[p]}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {/* ── Row 1: Performance per Clinician (1/2) + Efficiency Gap (1/2) ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 animate-enter-delay-3">
@@ -1882,10 +1992,10 @@ export default function ClinicalAdminAnalyticsDashboard() {
                     </div>
                     {/* Legend */}
                     <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 px-1">
-                      {(["Completed", "Ongoing", "Pending", "Deferred", "Blacklisted", "Re-referred"] as const).map(s => (
+                      {(["Completed", "Ongoing", "Overdue", "Deferred", "Blacklisted", "Re-referred"] as const).map(s => (
                         <div key={s} className="flex items-center gap-1">
                           <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS[s] }} />
-                          <span className="text-[9px] text-gray-500 font-medium">{s}</span>
+                          <span className="text-[9px] text-gray-500 font-medium">{s === "MedAlert" ? "Med Alert" : s}</span>
                         </div>
                       ))}
                     </div>
@@ -1934,7 +2044,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                               />
                               <Bar dataKey="Completed"  name="Completed"  stackId="a" fill={STATUS_COLORS.Completed}  radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Ongoing"    name="Ongoing"    stackId="a" fill={STATUS_COLORS.Ongoing}    radius={[0, 0, 0, 0]} />
-                              <Bar dataKey="Pending"    name="Pending"    stackId="a" fill={STATUS_COLORS.Pending}    radius={[0, 0, 0, 0]} />
+                              <Bar dataKey="Overdue"    name="Overdue"    stackId="a" fill={STATUS_COLORS.Overdue}    radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Deferred"   name="Deferred"   stackId="a" fill={STATUS_COLORS.Deferred}   radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Blacklisted" name="Blacklisted" stackId="a" fill={STATUS_COLORS.Blacklisted} radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Rereferred" name="Re-referred" stackId="a" fill={STATUS_COLORS["Re-referred"]} radius={[0, 4, 4, 0]} />
@@ -2270,7 +2380,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                     </div>
                     {/* Legend */}
                     <div className="flex items-center gap-4 mb-2 px-1">
-                      {[{ label: "Referred", color: "#5B8AB8" }, { label: "Accepted", color: "#22C55E" }, { label: "Completed", color: "#059669" }].map(l => (
+                      {[{ label: "Referred", color: "#5B8AB8" }, { label: "Accepted", color: "#22C55E" }, { label: "Ongoing", color: "#3B82F6" }, { label: "Completed", color: "#059669" }].map(l => (
                         <div key={l.label} className="flex items-center gap-1">
                           <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: l.color }} />
                           <span className="text-[9px] text-gray-500 font-medium">{l.label}</span>
@@ -2314,6 +2424,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                               />
                               <Bar dataKey="Referred"  name="Referred"  stackId="a" fill="#5B8AB8" radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Accepted"  name="Accepted"  stackId="a" fill="#22C55E" radius={[0, 0, 0, 0]} />
+                              <Bar dataKey="Ongoing"   name="Ongoing"   stackId="a" fill="#3B82F6" radius={[0, 0, 0, 0]} />
                               <Bar dataKey="Completed" name="Completed" stackId="a" fill="#059669" radius={[0, 4, 4, 0]} />
                             </BarChart>
                           </ResponsiveContainer>
@@ -2698,15 +2809,18 @@ export default function ClinicalAdminAnalyticsDashboard() {
                           const scale = max > 0 ? 100 / max : 0;
                           const refW = row.Referred * scale;
                           const accW = row.Accepted * scale;
+                          const ongW = row.Ongoing * scale;
                           const cmpW = row.Completed * scale;
                           return (
-                            <div key={row.service} title={`${row.service} — Referred: ${row.Referred}, Accepted: ${row.Accepted}, Completed: ${row.Completed}`}>
+                            <div key={row.service} title={`${row.service} — Referred: ${row.Referred}, Accepted: ${row.Accepted}, Ongoing: ${row.Ongoing}, Completed: ${row.Completed}`}>
                               <div className="flex items-center justify-between mb-0.5">
                                 <span className="text-[10px] font-semibold text-gray-700 truncate">{row.service}</span>
                                 <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
                                   <span className="text-[9px] font-bold text-[#F59E0B]">{row.Referred}</span>
                                   <span className="text-gray-300">/</span>
                                   <span className="text-[9px] font-bold text-[#3B82F6]">{row.Accepted}</span>
+                                  <span className="text-gray-300">/</span>
+                                  <span className="text-[9px] font-bold text-[#6366F1]">{row.Ongoing}</span>
                                   <span className="text-gray-300">/</span>
                                   <span className="text-[9px] font-bold text-[#22C55E]">{row.Completed}</span>
                                 </div>
@@ -2717,6 +2831,9 @@ export default function ClinicalAdminAnalyticsDashboard() {
                                 </div>
                                 <div className="flex h-[5px] w-full rounded-full overflow-hidden bg-gray-100">
                                   <div className="bg-[#3B82F6] h-full rounded-full" style={{ width: `${accW}%` }} />
+                                </div>
+                                <div className="flex h-[5px] w-full rounded-full overflow-hidden bg-gray-100">
+                                  <div className="bg-[#6366F1] h-full rounded-full" style={{ width: `${ongW}%` }} />
                                 </div>
                                 <div className="flex h-[5px] w-full rounded-full overflow-hidden bg-gray-100">
                                   <div className="bg-[#22C55E] h-full rounded-full" style={{ width: `${cmpW}%` }} />
@@ -2731,6 +2848,7 @@ export default function ClinicalAdminAnalyticsDashboard() {
                     <div className="flex items-center justify-center gap-4 mt-2 pt-2 border-t border-gray-100">
                       <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#F59E0B]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Referred</span></div>
                       <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#3B82F6]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Accepted</span></div>
+                      <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#6366F1]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Ongoing</span></div>
                       <div className="flex items-center gap-1.5"><div className="h-2.5 w-2.5 rounded-sm bg-[#22C55E]" /><span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">Completed</span></div>
                     </div>
                   </div>

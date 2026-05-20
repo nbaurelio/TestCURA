@@ -25,7 +25,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { sendSystemNotification } from "@/lib/utils/notify";
+import { sendSystemNotification, requestNotificationPermission } from "@/lib/utils/notify";
 
 type ReferralStatus = "ALL" | "AVAILABLE" | "ONGOING" | "COMPLETED" | "DEFERRED" | "BLACKLISTED";
 type RequestType = "ALL" | "REREFERRALS" | "EDIT_REQUESTS" | "DELETION_REQUESTS" | "STATUS_REQUESTS";
@@ -93,6 +93,7 @@ export default function ClinicalAdminDashboard() {
   }, []);
 
   useEffect(() => {
+    requestNotificationPermission();
     loadData();
   }, []);
 
@@ -282,7 +283,7 @@ export default function ClinicalAdminDashboard() {
       setIsApproveRereferOpen(false);
       setRereferToApprove(null);
       loadData();
-      sendSystemNotification("✅ Rerefer Approved", "The rereferral request has been approved.");
+      sendSystemNotification("✅ Rerefer Approved", "The rereferral request has been approved.", "referral");
     } catch (error) {
       console.error("Error approving rerefer request:", error);
     }
@@ -302,7 +303,7 @@ export default function ClinicalAdminDashboard() {
       setRereferToDecline(null);
       setDeclineReason("");
       loadData();
-      sendSystemNotification("❌ Rerefer Declined", "The rereferral request has been declined.");
+      sendSystemNotification("❌ Rerefer Declined", "The rereferral request has been declined.", "referral");
     } catch (error) {
       console.error("Error declining rerefer request:", error);
     }
@@ -363,7 +364,7 @@ export default function ClinicalAdminDashboard() {
       setIsApproveEditOpen(false);
       setEditRequestToAction(null);
       await loadData();
-      sendSystemNotification("✅ Edit Request Approved", "The edit request has been approved.");
+      sendSystemNotification("✅ Edit Request Approved", "The edit request has been approved.", "referral");
     } catch (error) {
       console.error("Error approving edit request:", error);
     }
@@ -377,7 +378,7 @@ export default function ClinicalAdminDashboard() {
       setEditRequestToAction(null);
       setDeclineReason("");
       await loadData();
-      sendSystemNotification("❌ Edit Request Declined", "The edit request has been declined.");
+      sendSystemNotification("❌ Edit Request Declined", "The edit request has been declined.", "referral");
     } catch (error) {
       console.error("Error declining edit request:", error);
     }
@@ -401,7 +402,7 @@ export default function ClinicalAdminDashboard() {
       setIsApproveDeletionOpen(false);
       setDeletionRequestToAction(null);
       await loadData();
-      sendSystemNotification("✅ Deletion Approved", "The deletion request has been approved. The referral has been removed.");
+      sendSystemNotification("✅ Deletion Approved", "The deletion request has been approved. The referral has been removed.", "referral");
     } catch (error) {
       console.error("Error approving deletion request:", error);
       alert("Failed to approve deletion request.");
@@ -416,7 +417,7 @@ export default function ClinicalAdminDashboard() {
       setDeletionRequestToAction(null);
       setDeclineReason("");
       await loadData();
-      sendSystemNotification("❌ Deletion Declined", "The deletion request has been declined.");
+      sendSystemNotification("❌ Deletion Declined", "The deletion request has been declined.", "referral");
     } catch (error) {
       console.error("Error declining deletion request:", error);
     }
@@ -550,7 +551,7 @@ export default function ClinicalAdminDashboard() {
       setIsApproveStatusChangeOpen(false);
       setStatusChangeToAction(null);
       await loadData();
-      sendSystemNotification("✅ Status Change Approved", "The status change has been approved.");
+      sendSystemNotification("✅ Status Change Approved", "The status change has been approved.", "referral");
     } catch (error) {
       console.error("Error approving status change:", error);
     }
@@ -604,7 +605,7 @@ export default function ClinicalAdminDashboard() {
       setStatusChangeToAction(null);
       setDeclineReason("");
       await loadData();
-      sendSystemNotification("❌ Status Change Declined", "Referral reverted to ongoing.");
+      sendSystemNotification("❌ Status Change Declined", "Referral reverted to ongoing.", "referral");
     } catch (error) {
       console.error("Error declining status change:", error);
     }

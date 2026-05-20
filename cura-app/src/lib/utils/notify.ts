@@ -1,41 +1,56 @@
 /**
  * Centralized Windows system notification utility.
  * Uses the Web Notification API to send native OS notifications.
- * Falls back silently if notifications are not supported or not permitted.
+ * Chrome/Edge require showNotification() via a ServiceWorker registration.
+ * Falls back to direct new Notification() for Firefox.
+ * Respects Do Not Disturb (DND) setting from notifications module.
+ * Also tracks notification in app state for Referral/Calendar panels.
  */
 
-export function sendSystemNotification(title: string, body: string) {
-  console.log("[notify] sendSystemNotification called:", title);
-  console.log("[notify] Notification supported:", typeof window !== "undefined" && "Notification" in window);
-  console.log("[notify] Notification.permission:", typeof window !== "undefined" && "Notification" in window ? Notification.permission : "N/A");
+import { getDNDState } from "@/lib/api/notifications";
 
-  if (typeof window === "undefined" || !("Notification" in window)) {
-    console.log("[notify] Notification API not available");
-    return;
+// Store reference to the context add function (set by NotificationProvider)
+let addNotificationRef: ((notification: { type: "referral" | "calendar" | "system"; title: string; body: string }) => void) | null = null;
+
+export function setNotificationAddFunction(fn: typeof addNotificationRef) {
+  addNotificationRef = fn;
+}
+
+export async function sendSystemNotification(
+  title: string,
+  body: string,
+  type: "referral" | "calendar" | "system" = "system"
+) {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  // Check DND state - skip notification if enabled
+  if (getDNDState()) return;
+
+  // Add to in-app notification tracking (for Referral/Calendar panels)
+  if (addNotificationRef) {
+    addNotificationRef({ type, title, body });
   }
-  if (Notification.permission !== "granted") {
-    console.log("[notify] Permission not granted, skipping notification");
-    return;
-  }
+
+  const options: NotificationOptions = { body, icon: "/favicon.ico" };
 
   try {
-    const n = new Notification(title, { body, icon: "/favicon.ico" });
-    console.log("[notify] Notification created successfully:", n);
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.showNotification(title, options);
+        return;
+      }
+    }
+    // Fallback for Firefox (supports direct Notification)
+    new Notification(title, options);
   } catch (e) {
     console.warn("[notify] Failed to send notification:", e);
   }
 }
 
 export function requestNotificationPermission() {
-  console.log("[notify] requestNotificationPermission called");
-  if (typeof window === "undefined" || !("Notification" in window)) {
-    console.log("[notify] Notification API not available");
-    return;
-  }
-  console.log("[notify] Current permission:", Notification.permission);
+  if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission === "default") {
-    Notification.requestPermission().then((result) => {
-      console.log("[notify] Permission result:", result);
-    });
+    Notification.requestPermission();
   }
 }

@@ -17,7 +17,7 @@
 
 -- ─── 0. Defensive column additions (idempotent) ────────────────────────────
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS subrole TEXT;
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS adviser_id UUID;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS adviser_ids TEXT[];
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS password TEXT;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE';
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;
@@ -82,10 +82,10 @@ DELETE FROM profiles;
 --   4   Professors (prof1…prof4)                              (2…5)
 --  36   Advisee Clinicians (9 each × 4 professors)            (a/b/c/d…)
 --   5   Special-state accounts (INACTIVE / LOCKED / counter)  (eeee…)
---   4   Unassigned clinicians (no adviser)                    (ffff…)
+--   4   Unassigned clinicians (no advisers)                   (ffff…)
 -- All passwords = 'password'.  System Admin sees this list under /system-admin/users.
 
-INSERT INTO profiles (id, email, first_name, last_name, role, subrole, adviser_id,
+INSERT INTO profiles (id, email, first_name, last_name, role, subrole, adviser_ids,
                       year_level, clinical_department, batch_name, password, status,
                       failed_login_attempts, avatar_url) VALUES
 -- System Admin
@@ -102,57 +102,53 @@ INSERT INTO profiles (id, email, first_name, last_name, role, subrole, adviser_i
 ('55555555-5555-5555-5555-555555555555','prof4@example.com','Roberto','Aquino','professor',NULL,NULL,NULL,'Ortho','Faculty','password','ACTIVE',0,NULL),
 
 -- Prof Maria's 9 advisees (a-prefix UUIDs)
-('aaaa0000-0000-0000-0000-000000000001','carlos@example.com','Carlos','Santos','clinician',NULL,'22222222-2222-2222-2222-222222222222','4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000002','maria.c@example.com','Maria Clara','Reyes','clinician',NULL,'22222222-2222-2222-2222-222222222222','5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000003','jose@example.com','Jose','Garcia','clinician',NULL,'22222222-2222-2222-2222-222222222222','4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000004','liza@example.com','Liza','Bautista','clinician',NULL,'22222222-2222-2222-2222-222222222222','4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000005','marco@example.com','Marco','Fernandez','clinician',NULL,'22222222-2222-2222-2222-222222222222','5th yr','OM','Batch 2024','password','ACTIVE',1,NULL),
-('aaaa0000-0000-0000-0000-000000000006','nina@example.com','Nina','Aurelio','clinician',NULL,'22222222-2222-2222-2222-222222222222','4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000007','paulo@example.com','Paulo','Ramirez','clinician',NULL,'22222222-2222-2222-2222-222222222222','5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000008','rica@example.com','Rica','Mendoza','clinician',NULL,'22222222-2222-2222-2222-222222222222','3rd yr','OM','Batch 2026','password','ACTIVE',0,NULL),
-('aaaa0000-0000-0000-0000-000000000009','tomas@example.com','Tomas','Lim','clinician',NULL,'22222222-2222-2222-2222-222222222222','4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000001','carlos@example.com','Carlos','Santos','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000002','maria.c@example.com','Maria Clara','Reyes','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000003','jose@example.com','Jose','Garcia','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000004','liza@example.com','Liza','Bautista','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000005','marco@example.com','Marco','Fernandez','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'5th yr','OM','Batch 2024','password','ACTIVE',1,NULL),
+('aaaa0000-0000-0000-0000-000000000006','nina@example.com','Nina','Aurelio','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000007','paulo@example.com','Paulo','Ramirez','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000008','rica@example.com','Rica','Mendoza','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'3rd yr','OM','Batch 2026','password','ACTIVE',0,NULL),
+('aaaa0000-0000-0000-0000-000000000009','tomas@example.com','Tomas','Lim','clinician',NULL,ARRAY['22222222-2222-2222-2222-222222222222'],'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
 
 -- Prof Eduardo's 9 advisees
-('bbbb0000-0000-0000-0000-000000000001','anna@example.com','Anna','Mendoza','clinician',NULL,'33333333-3333-3333-3333-333333333333','4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000002','miguel@example.com','Miguel','Tan','clinician',NULL,'33333333-3333-3333-3333-333333333333','5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000003','sarah@example.com','Sarah','Lopez','clinician',NULL,'33333333-3333-3333-3333-333333333333','4th yr','Prostho','Batch 2025','password','ACTIVE',2,NULL),
-('bbbb0000-0000-0000-0000-000000000004','daniel@example.com','Daniel','Ocampo','clinician',NULL,'33333333-3333-3333-3333-333333333333','3rd yr','OP','Batch 2026','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000005','elena@example.com','Elena','Vargas','clinician',NULL,'33333333-3333-3333-3333-333333333333','4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000006','francis@example.com','Francis','Yu','clinician',NULL,'33333333-3333-3333-3333-333333333333','5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000007','grace@example.com','Grace','Castillo','clinician',NULL,'33333333-3333-3333-3333-333333333333','4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000008','hector@example.com','Hector','Navarro','clinician',NULL,'33333333-3333-3333-3333-333333333333','5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
-('bbbb0000-0000-0000-0000-000000000009','isabel@example.com','Isabel','Dela Rosa','clinician',NULL,'33333333-3333-3333-3333-333333333333','4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000001','anna@example.com','Anna','Mendoza','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000002','miguel@example.com','Miguel','Tan','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000003','sarah@example.com','Sarah','Lopez','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'4th yr','Prostho','Batch 2025','password','ACTIVE',2,NULL),
+('bbbb0000-0000-0000-0000-000000000004','daniel@example.com','Daniel','Ocampo','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'3rd yr','OP','Batch 2026','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000005','elena@example.com','Elena','Vargas','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000006','francis@example.com','Francis','Yu','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000007','grace@example.com','Grace','Castillo','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000008','hector@example.com','Hector','Navarro','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
+('bbbb0000-0000-0000-0000-000000000009','isabel@example.com','Isabel','Dela Rosa','clinician',NULL,ARRAY['33333333-3333-3333-3333-333333333333'],'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
 
 -- Prof Imelda's 9 advisees
-('cafe0000-0000-0000-0000-000000000001','jenny@example.com','Jenny','Pineda','clinician',NULL,'44444444-4444-4444-4444-444444444444','4th yr','Prostho','Batch 2025','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000002','kevin@example.com','Kevin','Morales','clinician',NULL,'44444444-4444-4444-4444-444444444444','5th yr','OP','Batch 2024','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000003','lara@example.com','Lara','Sison','clinician',NULL,'44444444-4444-4444-4444-444444444444','4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000004','mark@example.com','Mark','Tolentino','clinician',NULL,'44444444-4444-4444-4444-444444444444','3rd yr','Ortho','Batch 2026','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000005','olivia@example.com','Olivia','Salonga','clinician',NULL,'44444444-4444-4444-4444-444444444444','5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000006','patrick@example.com','Patrick','Gomez','clinician',NULL,'44444444-4444-4444-4444-444444444444','4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000007','queenie@example.com','Queenie','Velasco','clinician',NULL,'44444444-4444-4444-4444-444444444444','4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000008','ramon@example.com','Ramon','Cabrera','clinician',NULL,'44444444-4444-4444-4444-444444444444','5th yr','Ortho','Batch 2024','password','ACTIVE',0,NULL),
-('cafe0000-0000-0000-0000-000000000009','sofia@example.com','Sofia','Robles','clinician',NULL,'44444444-4444-4444-4444-444444444444','4th yr','Prostho','Batch 2025','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000001','jenny@example.com','Jenny','Pineda','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'4th yr','Prostho','Batch 2025','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000002','kevin@example.com','Kevin','Morales','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'5th yr','OP','Batch 2024','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000003','lara@example.com','Lara','Sison','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000004','mark@example.com','Mark','Tolentino','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'3rd yr','Ortho','Batch 2026','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000005','olivia@example.com','Olivia','Salonga','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000006','patrick@example.com','Patrick','Gomez','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000007','queenie@example.com','Queenie','Velasco','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000008','ramon@example.com','Ramon','Cabrera','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'5th yr','Ortho','Batch 2024','password','ACTIVE',0,NULL),
+('cafe0000-0000-0000-0000-000000000009','sofia@example.com','Sofia','Robles','clinician',NULL,ARRAY['44444444-4444-4444-4444-444444444444'],'4th yr','Prostho','Batch 2025','password','ACTIVE',0,NULL),
 
 -- Prof Roberto's 9 advisees
-('dcba0000-0000-0000-0000-000000000001','tristan@example.com','Tristan','Buenaventura','clinician',NULL,'55555555-5555-5555-5555-555555555555','4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000002','ursula@example.com','Ursula','Magsaysay','clinician',NULL,'55555555-5555-5555-5555-555555555555','5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000003','victor@example.com','Victor','Padilla','clinician',NULL,'55555555-5555-5555-5555-555555555555','4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000004','wendy@example.com','Wendy','Trinidad','clinician',NULL,'55555555-5555-5555-5555-555555555555','5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000005','xavier@example.com','Xavier','Madrigal','clinician',NULL,'55555555-5555-5555-5555-555555555555','3rd yr','OM','Batch 2026','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000006','yara@example.com','Yara','Domingo','clinician',NULL,'55555555-5555-5555-5555-555555555555','4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000007','zach@example.com','Zach','Ilagan','clinician',NULL,'55555555-5555-5555-5555-555555555555','5th yr','OP','Batch 2024','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000008','aida@example.com','Aida','Bonifacio','clinician',NULL,'55555555-5555-5555-5555-555555555555','4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
-('dcba0000-0000-0000-0000-000000000009','bernie@example.com','Bernie','Quirino','clinician',NULL,'55555555-5555-5555-5555-555555555555','4th yr','Prostho','Batch 2025','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000001','tristan@example.com','Tristan','Buenaventura','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000002','ursula@example.com','Ursula','Magsaysay','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000003','victor@example.com','Victor','Padilla','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'4th yr','OP','Batch 2025','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000004','wendy@example.com','Wendy','Trinidad','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000005','xavier@example.com','Xavier','Madrigal','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'3rd yr','OM','Batch 2026','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000006','yara@example.com','Yara','Domingo','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000007','zach@example.com','Zach','Ilagan','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'5th yr','OP','Batch 2024','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000008','aida@example.com','Aida','Bonifacio','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'4th yr','OM','Batch 2025','password','ACTIVE',0,NULL),
+('dcba0000-0000-0000-0000-000000000009','bernie@example.com','Bernie','Quirino','clinician',NULL,ARRAY['55555555-5555-5555-5555-555555555555'],'4th yr','Prostho','Batch 2025','password','ACTIVE',0,NULL),
 
 -- Special state accounts
-('eeee0000-0000-0000-0000-000000000001','locked@example.com','Lloyd','Cabanatuan','clinician',NULL,'22222222-2222-2222-2222-222222222222','4th yr','OM','Batch 2025','password','LOCKED',5,NULL),
-('eeee0000-0000-0000-0000-000000000002','inactive@example.com','Inez','Reyes','clinician',NULL,'33333333-3333-3333-3333-333333333333','4th yr','OP','Batch 2025','password','INACTIVE',0,NULL),
-('eeee0000-0000-0000-0000-000000000003','warned@example.com','Wally','Manalo','clinician',NULL,'44444444-4444-4444-4444-444444444444','5th yr','Prostho','Batch 2024','password','ACTIVE',3,NULL),
-('eeee0000-0000-0000-0000-000000000004','retired@example.com','Rosa','Baltazar','clinician',NULL,'55555555-5555-5555-5555-555555555555','5th yr','Ortho','Batch 2024','password','INACTIVE',0,NULL),
 ('eeee0000-0000-0000-0000-000000000005','newprof@example.com','Nestor','Galvez','professor',NULL,NULL,NULL,'OM','Faculty','password','INACTIVE',0,NULL),
 
--- Unassigned (no adviser) clinicians — useful for "no scope" tests
+-- Unassigned (no advisers) clinicians — useful for "no scope" tests
 ('ffff0000-0000-0000-0000-000000000001','test@example.com','Test','User','clinician',NULL,NULL,'5th yr','Prostho','Batch 2024','password','ACTIVE',0,NULL),
 ('ffff0000-0000-0000-0000-000000000002','juan@example.com','Juan','Dela Cruz','clinician',NULL,NULL,'4th yr','Ortho','Batch 2025','password','ACTIVE',0,NULL),
 ('ffff0000-0000-0000-0000-000000000003','blanca@example.com','Blanca','Villareal','clinician',NULL,NULL,'5th yr','OM','Batch 2024','password','ACTIVE',0,NULL),
@@ -164,6 +160,7 @@ INSERT INTO profiles (id, email, first_name, last_name, role, subrole, adviser_i
 -- Strategy: a DO block iterates a curated array of templates. Templates rotate
 -- creator/acceptor pairs (creator ≠ acceptor), sections, treatments, statuses
 -- and request states so every UI filter has data to display.
+-- ═══════════════════════════════════════════════════════════════════════════
 
 DO $seed_referrals$
 DECLARE
@@ -363,7 +360,7 @@ BEGIN
       END CASE;
     END IF;
 
-    SELECT adviser_id INTO v_creator_adviser FROM profiles WHERE id = v_creator;
+    SELECT adviser_ids[1] INTO v_creator_adviser FROM profiles WHERE id = v_creator;
 
     INSERT INTO referrals (
       user_id, chart_number, treatment, age, sex, medical_alert,
@@ -628,7 +625,7 @@ BEGIN
     -- Professor color override + favorite for ~half the sample
     IF i % 2 = 0 THEN
       INSERT INTO event_overrides (professor_id, event_id, color, is_favorite)
-      VALUES ('22222222-2222-2222-2222-222222222222', e.id,
+      VALUES ('22222222-2222-2222-2222-222222222222'::uuid, e.id,
               CASE WHEN i % 4 = 0 THEN '#A855F7' ELSE '#0EA5E9' END,
               i % 4 = 0);
     END IF;

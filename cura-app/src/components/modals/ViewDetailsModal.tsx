@@ -570,14 +570,16 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
             const fmtDays = (ms: number | null): string => {
               if (ms === null || ms < 0) return "—";
               const hours = ms / (1000 * 60 * 60);
-              if (hours < 24) return "<1 day";
+              if (hours < 24) return "0 day";
               const days = Math.round(hours / 24);
               return `${days} day${days === 1 ? "" : "s"}`;
             };
 
             // Cycle bounds: from this version's timestamp to next version's timestamp (or now if latest).
-            // Special case: for REREFER_REQUEST versions, the cycle only truly starts when the referral
+            // Special case 1: for REREFER_REQUEST versions, the cycle only truly starts when the referral
             // is SENT BACK to the system (after professor approval). Use that timestamp instead.
+            // Special case 2: for overdue referrals that are DEFERRED, the timeline resets at deferral
+            // (treating it like a "send back to system" for overdue cases).
             const versionStartTs = currentVersion ? new Date(currentVersion.timestamp).getTime() : new Date(r.created_at).getTime();
             const versionEndTs = (currentIndex < total - 1)
               ? new Date(versions[currentIndex + 1].timestamp).getTime()
@@ -592,11 +594,35 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
                 )
               : null;
             const sendBackTs = sendBackEvent ? new Date(sendBackEvent.timestamp).getTime() : null;
+
+            // Check if this version follows an overdue state - look for any send-back event
+            // that follows an overdue period (>7 days since appointment)
+            const wasOverdueBefore = (() => {
+              const prevVersion = currentIndex > 0 ? versions[currentIndex - 1] : null;
+              if (!prevVersion) return false;
+              const prevSnapshot = prevVersion.snapshot;
+              if (!prevSnapshot?.tentative_appointment_schedule || !prevSnapshot?.accepted_at) return false;
+              const apptDate = new Date(prevSnapshot.tentative_appointment_schedule).getTime();
+              const versionDate = versionStartTs;
+              const daysSinceAppt = Math.floor((versionDate - apptDate) / (1000 * 60 * 60 * 24));
+              return daysSinceAppt > 7 && prevSnapshot.referral_status?.toLowerCase() === "ongoing";
+            })();
+            // Find send-back event within this version's timeframe (any send-back after overdue resets timeline)
+            const overdueSendBackEvent = wasOverdueBefore
+              ? rereferralHistory.find(e =>
+                  e.action === "SEND_BACK_TO_SYSTEM" &&
+                  new Date(e.timestamp).getTime() >= versionStartTs &&
+                  new Date(e.timestamp).getTime() <= versionEndTs + 1000
+                )
+              : null;
+            const overdueSendBackTs = overdueSendBackEvent ? new Date(overdueSendBackEvent.timestamp).getTime() : null;
+
             // For original version: use the original referral creation date
             // For rereferral cycles: use send-back timestamp or version start
+            // For overdue referrals sent back: use send-back timestamp (reset)
             const cycleStartTs = isOriginal
               ? new Date(r.created_at).getTime()
-              : (sendBackTs ?? versionStartTs);
+              : (sendBackTs ?? overdueSendBackTs ?? versionStartTs);
             const cycleEndTs = isOriginal ? Date.now() : versionEndTs;
             const rereferNotSentBack = isRerefer && !isOriginal && sendBackTs === null;
 
@@ -636,7 +662,12 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
                 : (liveCompletedTs !== null && liveCompletedTs >= cycleStartTs ? liveCompletedTs : null));
 
             const cycleLabel = "Referral Timeline";
-            const cycleStartLabel = (isRerefer && !isOriginal) ? "Sent Back to System" : "Referral Start";
+            const isOverdueSendBack = overdueSendBackTs !== null;
+            const cycleStartLabel = isOverdueSendBack
+              ? "Sent Back to System"
+              : (isRerefer && !isOriginal)
+                ? "Sent Back to System"
+                : "Referral Start";
 
             const rows: { label: string; value: string }[] = [];
 
@@ -672,6 +703,33 @@ export function ViewDetailsModal({ referral, isOpen, onClose, hideChartNumber = 
               } else if (acceptedTs !== null) {
                 rows.push({ label: "Days to Acceptance", value: fmtDays(msToDays(acceptedTs - cycleStartTs)) });
                 rows.push({ label: "Days Since Acceptance", value: fmtDays(msToDays(cycleEndTs - acceptedTs)) });
+              }
+
+              // ── Appointment-based metrics (only when referral is accepted
+              // and a tentative appointment schedule exists)
+              const apptStr = r.tentative_appointment_schedule;
+              if (acceptedTs !== null && apptStr) {
+                const apptTs = new Date(apptStr).getTime();
+                const now = Date.now();
+                const isOngoing = !["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() || "");
+                // Days to Appointment (shown only if appointment is in the future or today)
+                if (apptTs > acceptedTs) {
+                  if (apptTs > now) {
+                    rows.push({
+                      label: "Days to Appointment",
+                      value: fmtDays(msToDays(apptTs - now)),
+                    });
+                  }
+                }
+                // Since Appointment — shown once appointment date has passed
+                if (apptTs <= now && isOngoing) {
+                  rows.push({ label: "Days Since Appointment", value: fmtDays(msToDays(now - apptTs)) });
+                  // Since Overdue — shown once 7+ days have passed since appointment
+                  const daysSinceAppt = Math.floor((now - apptTs) / (1000 * 60 * 60 * 24));
+                  if (daysSinceAppt > 7) {
+                    rows.push({ label: "Days Since Overdue", value: fmtDays(msToDays(now - apptTs - 7 * 24 * 60 * 60 * 1000)) });
+                  }
+                }
               }
             }
 

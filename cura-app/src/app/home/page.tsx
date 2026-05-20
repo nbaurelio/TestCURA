@@ -195,12 +195,15 @@ export default function HomePage() {
 
       const effectivePostedAt = (r: Referral): string => sbMap.get(r.id) ?? r.created_at;
 
-      // Get overdue referrals: not accepted and posted (effectively) more than 7 days ago
+      // Get overdue referrals: not accepted, posted (effectively) more than 7 days ago,
+      // and still available (not completed / deferred / blacklisted)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const overdue = (data || []).filter(r =>
         r.accepted_by === 'None' &&
         r.created_at &&
-        new Date(effectivePostedAt(r)) < sevenDaysAgo
+        new Date(effectivePostedAt(r)) < sevenDaysAgo &&
+        !["completed", "deferred", "blacklisted"].includes(r.referral_status?.toLowerCase() ?? "") &&
+        r.user_id !== getCurrentUserId()
       );
       // Sort by oldest first (most overdue)
       overdue.sort((a, b) => new Date(effectivePostedAt(a)).getTime() - new Date(effectivePostedAt(b)).getTime());
@@ -342,7 +345,7 @@ export default function HomePage() {
 
   const handleReferralSaved = () => {
     loadReferrals();
-    sendSystemNotification("📋 Referral Posted", "Your referral has been successfully posted on the homepage.");
+    sendSystemNotification("📋 Referral Posted", "Your referral has been successfully posted on the homepage.", "referral");
   };
 
   const handleDeleteReferral = useCallback((id: string) => {
@@ -358,7 +361,7 @@ export default function HomePage() {
       setIsDeleteConfirmOpen(false);
       setReferralToDelete(null);
       loadReferrals();
-      sendSystemNotification("🗑️ Referral Deleted", "The referral has been successfully deleted.");
+      sendSystemNotification("🗑️ Referral Deleted", "The referral has been successfully deleted.", "referral");
     } catch (error) {
       console.error("Error deleting referral:", error);
       alert("Failed to delete referral. Please try again.");
@@ -373,7 +376,7 @@ export default function HomePage() {
     try {
       await updateReferral(id, updates as any);
       loadReferrals();
-      sendSystemNotification("✏️ Referral Updated", "The referral has been successfully edited.");
+      sendSystemNotification("✏️ Referral Updated", "The referral has been successfully edited.", "referral");
     } catch (error: any) {
       console.error("Error updating referral (full):", JSON.stringify(error, null, 2));
       const msg = error?.message || error?.error_description || JSON.stringify(error);
@@ -406,12 +409,18 @@ export default function HomePage() {
         if (referral.accepted_by && referral.accepted_by !== 'None') {
           return false;
         }
+        // Hide blacklisted or deferred referrals — they are no longer available
+        const rs = referral.referral_status?.toLowerCase();
+        if (rs === 'blacklisted' || rs === 'deferred') {
+          return false;
+        }
         // Belt-and-suspenders: also drop any pinned referral whose status
         // is pending/approved (legacy guard; covered by the above for
         // freshly-accepted rows).
         if (referral.is_featured && (referral.status === 'pending' || referral.status === 'approved')) {
           return false;
         }
+
         // Exclude referrals with pending deletion requests
         if (referral.deletion_request_status === 'pending') {
           return false;
@@ -452,7 +461,7 @@ export default function HomePage() {
       setIsAcceptConfirmOpen(false);
       setReferralToAccept(null);
       loadReferrals();
-      sendSystemNotification("✅ Referral Accepted", "You have successfully accepted the referral.");
+      sendSystemNotification("✅ Referral Accepted", "You have successfully accepted the referral.", "referral");
 
       // Auto-create a planner event for the tentative appointment date
       if (referral?.tentative_appointment_schedule) {

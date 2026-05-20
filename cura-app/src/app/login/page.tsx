@@ -260,8 +260,8 @@ export default function LoginPage() {
         </div>
 
         {/* Footer tagline */}
-        <p className="text-center text-[10px] text-secondary font-medium uppercase tracking-wide mt-4 animate-[fadeIn_0.6s_ease-out_0.4s_both]">
-          Centralized University Referral Application
+        <p className="text-center text-[8px] text-secondary font-medium uppercase tracking-wide mt-4 animate-[fadeIn_0.6s_ease-out_0.4s_both]">
+          Centralized University-Based Referral Assistant
         </p>
 
       </div>

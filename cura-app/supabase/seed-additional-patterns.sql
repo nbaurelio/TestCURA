@@ -30,7 +30,7 @@ DELETE FROM profiles  WHERE id = '66666666-6666-6666-6666-666666666666';
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 1. Clinical Chair professor (subrole='Clinical Chair' → sees ALL events)
 -- ═══════════════════════════════════════════════════════════════════════════
-INSERT INTO profiles (id, email, first_name, last_name, role, subrole, adviser_id,
+INSERT INTO profiles (id, email, first_name, last_name, role, subrole, adviser_ids,
                       year_level, clinical_department, batch_name, password, status,
                       failed_login_attempts, avatar_url) VALUES
 ('66666666-6666-6666-6666-666666666666','chair@example.com','Conrado','Hidalgo',
@@ -60,7 +60,7 @@ DECLARE
   v_is_accepted BOOLEAN;
   v_referral_status TEXT; v_status_text TEXT;
 BEGIN
-  SELECT adviser_id INTO v_creator_adv FROM profiles WHERE id = p_creator;
+  SELECT adviser_ids[1] INTO v_creator_adv FROM profiles WHERE id = p_creator;
   SELECT first_name || ' ' || last_name INTO v_acceptor_name
     FROM profiles WHERE id = p_acceptor;
 

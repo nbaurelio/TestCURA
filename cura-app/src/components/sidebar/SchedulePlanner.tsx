@@ -216,6 +216,20 @@ export function SchedulePlanner({
 
   // Notify user at multiple intervals before a favorited event
   // Thresholds: 3 days, 1 day, 1 hour, 30 min
+  // Skip 3-day notification if event is already within 2 days when favorited
+  const favoriteTimeRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    // Track when events are favorited
+    events.forEach((event) => {
+      if (event.is_favorite && !favoriteTimeRef.current.has(event.id)) {
+        favoriteTimeRef.current.set(event.id, Date.now());
+      } else if (!event.is_favorite && favoriteTimeRef.current.has(event.id)) {
+        favoriteTimeRef.current.delete(event.id);
+      }
+    });
+  }, [events]);
+
   useEffect(() => {
     if (events.length === 0) return;
 
@@ -226,6 +240,7 @@ export function SchedulePlanner({
       { minutes: 30, label: "30 minutes" },
     ];
 
+    const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
 
     const checkUpcoming = () => {
       const now = new Date().getTime();
@@ -236,12 +251,28 @@ export function SchedulePlanner({
         const diff = eventTime - now;
         if (diff <= 0) return; // Already started
 
+        // Check when this event was favorited
+        const favoritedAt = favoriteTimeRef.current.get(event.id);
+        const wasFavoritedWithin2DaysOfEvent = favoritedAt && (eventTime - favoritedAt) < TWO_DAYS_MS;
+
         THRESHOLDS.forEach(({ minutes, label }) => {
           const key = `${event.id}_${minutes}`;
           if (notifiedRef.current.has(key)) return;
+
+          // Skip 3-day notification if event was favorited within 2 days of event
+          if (minutes === 4320 && wasFavoritedWithin2DaysOfEvent) {
+            notifiedRef.current.add(key); // Mark as "sent" so we don't check again
+            return;
+          }
+
           if (diff <= minutes * 60 * 1000) {
             notifiedRef.current.add(key);
-            sendSystemNotification(`⭐ Upcoming: ${event.title}`, `Starts in ${label}`);
+            const locationStr = event.location ? ` at ${event.location}` : "";
+            sendSystemNotification(
+              `⭐ Upcoming: ${event.title}`,
+              `Starts in ${label}${locationStr}`,
+              "calendar"
+            );
           }
         });
       });

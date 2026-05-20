@@ -77,6 +77,7 @@ interface ReferralCardProps {
   createdByName?: string;
   onSendBackToSystem?: (id: string) => void;
   statusChangeReason?: string | null;
+  statusChangeDeclineReason?: string | null;
 }
 
 function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onCancel: () => void; onConfirm: () => void }) {
@@ -485,6 +486,7 @@ export function ReferralCard({
   createdByName,
   onSendBackToSystem,
   statusChangeReason,
+  statusChangeDeclineReason,
 }: ReferralCardProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -556,7 +558,7 @@ export function ReferralCard({
       await submitEditRequest(id, reason, professorIds);
       setIsEditRequestOpen(false);
       onEditRequestSubmitted?.();
-      sendSystemNotification("📝 Edit Request Submitted", "Your edit request has been submitted for approval.");
+      sendSystemNotification("📝 Edit Request Submitted", "Your edit request has been submitted for approval.", "referral");
     } catch (error) {
       console.error("Error submitting edit request:", error);
       alert("Failed to submit edit request: " + (error as Error).message);
@@ -569,7 +571,7 @@ export function ReferralCard({
       setIsRereferOpen(false);
       onRerefer?.(id);
       onEditRequestSubmitted?.();
-      sendSystemNotification("🔄 Rerefer Request Submitted", "Your rereferral request has been submitted for approval.");
+      sendSystemNotification("🔄 Rerefer Request Submitted", "Your rereferral request has been submitted for approval.", "referral");
     } catch (error) {
       console.error("Error submitting rerefer request:", error);
       alert("Failed to submit rerefer request: " + (error as Error).message);
@@ -581,7 +583,7 @@ export function ReferralCard({
       await submitDeletionRequest(id, reason, professorIds);
       setIsDeletionRequestOpen(false);
       onEditRequestSubmitted?.();
-      sendSystemNotification("🗑️ Deletion Request Submitted", "Your deletion request has been submitted for approval.");
+      sendSystemNotification("🗑️ Deletion Request Submitted", "Your deletion request has been submitted for approval.", "referral");
     } catch (error) {
       console.error("Error submitting deletion request:", error);
       alert("Failed to submit deletion request: " + (error as Error).message);
@@ -706,6 +708,12 @@ export function ReferralCard({
                 <p className="text-gray-600">{deletionRequestReason}</p>
               </div>
             )}
+            {statusChangeDeclineReason && (
+              <div className="bg-gray-50 p-3 rounded border-l-4 border-gray-400">
+                <p className="font-semibold text-gray-700 mb-1 text-xs uppercase tracking-wide">Status Change Declined</p>
+                <p className="text-gray-600">{statusChangeDeclineReason}</p>
+              </div>
+            )}
             {acceptedBy && acceptedBy !== 'None' && (
               <div className="bg-secondary/5 px-3 py-2 rounded-lg border border-secondary/20">
                 <p className="font-bold text-secondary text-[10px] uppercase tracking-wide mb-1.5">Acceptance Details</p>
@@ -828,22 +836,6 @@ export function ReferralCard({
           )}
 
           {/* Accepted Referral Status Badge */}
-          {/* Pending Rerefer Badge */}
-          {acceptedReferralsPage && rereferRequestStatus === "pending" && (
-            <div className="bg-amber-100 border-2 border-amber-500 text-amber-700 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
-              PENDING REREFER
-            </div>
-          )}
-          {acceptedReferralsPage && rereferRequestStatus === "approved" && (
-            <div className="bg-green-100 border-2 border-green-500 text-green-700 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
-              REREFER APPROVED
-            </div>
-          )}
-          {acceptedReferralsPage && rereferRequestStatus === "declined" && (
-            <div className="bg-red-100 border-2 border-red-500 text-red-600 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
-              DECLINED
-            </div>
-          )}
           {referralStatus && (acceptedReferralsPage || (acceptedBy && acceptedBy !== "None")) && (
             <div className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 ${
               referralStatus === "ongoing"
@@ -857,6 +849,23 @@ export function ReferralCard({
                 : "bg-blue-100 border-blue-500 text-blue-700"
             }`}>
               {referralStatus}
+            </div>
+          )}
+          {/* Pending Rerefer Badge */}
+          {acceptedReferralsPage && rereferRequestStatus === "pending" && (
+            <div className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border-2 bg-yellow-50 border-yellow-500 text-yellow-700 flex items-center gap-1">
+              <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              PENDING REREFER
+            </div>
+          )}
+          {acceptedReferralsPage && rereferRequestStatus === "approved" && (
+            <div className="bg-green-100 border-2 border-green-500 text-green-700 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
+              REREFER APPROVED
+            </div>
+          )}
+          {acceptedReferralsPage && rereferRequestStatus === "declined" && (
+            <div className="bg-red-100 border-2 border-red-500 text-red-600 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide">
+              DECLINED
             </div>
           )}
 
@@ -914,7 +923,7 @@ export function ReferralCard({
                       try {
                         await sendBackToSystem(id);
                         onSendBackToSystem?.(id);
-                        sendSystemNotification("🔄 Referral Sent Back", "The referral has been sent back to the system.");
+                        sendSystemNotification("🔄 Referral Sent Back", "The referral has been sent back to the system.", "referral");
                       } catch (e) {
                         console.error("Error sending back to system:", e);
                       }
@@ -1050,7 +1059,7 @@ export function ReferralCard({
           try {
             await sendBackToSystem(id);
             onSendBackToSystem?.(id);
-            sendSystemNotification("🔄 Referral Sent Back", "The referral has been edited and sent back to the system.");
+            sendSystemNotification("🔄 Referral Sent Back", "The referral has been edited and sent back to the system.", "referral");
           } catch (e) {
             console.error("Error sending back to system after edit:", e);
           }

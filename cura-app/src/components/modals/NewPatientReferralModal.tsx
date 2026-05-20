@@ -46,6 +46,7 @@ export function NewPatientReferralModal({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -207,7 +208,27 @@ export function NewPatientReferralModal({
     return discipline?.treatmentServices || [];
   };
 
+  const getValidationErrors = () => {
+    const errs: Record<string, string> = {};
+    if (!formData.chart_number.trim()) errs.chart_number = "Chart number is required.";
+    if (!formData.age) errs.age = "Age is required.";
+    if (!formData.sex) errs.sex = "Sex is required.";
+    if (!formData.clinical_section_origin) errs.origin_section = "Clinical section is required.";
+    if (originSection !== "prostho" && !formData.clinical_discipline_origin) errs.origin_discipline = "Clinical discipline is required.";
+    if (!formData.clinical_section_destination) errs.dest_section = "Clinical section is required.";
+    if (destSection !== "prostho" && !formData.clinical_discipline_destination) errs.dest_discipline = "Clinical discipline is required.";
+    if (!formData.treatment_service_destination) errs.dest_treatment = "Treatment service is required.";
+    if (formData.treatment_service_destination === "Special Case" && !formData.special_case?.trim()) errs.special_case = "Special case description is required.";
+    return errs;
+  };
+
   const handleSave = async () => {
+    setSubmitted(true);
+    const errs = getValidationErrors();
+    if (Object.keys(errs).length > 0) {
+      setError("Please fill in all required fields.");
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -247,6 +268,7 @@ export function NewPatientReferralModal({
       setDestSection("");
       setDestDiscipline("");
       setDestTreatment("");
+      setSubmitted(false);
     } catch (err) {
       console.error("Error saving referral:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to save referral";
@@ -286,22 +308,26 @@ export function NewPatientReferralModal({
           )}
 
           {/* Patient Info */}
+          {(() => {
+            const errs = submitted ? getValidationErrors() : {};
+            return (
           <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3 space-y-2">
             <label className="text-[10px] font-bold text-secondary uppercase tracking-wide block">Patient Info</label>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Chart Number *</label>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Chart Number <span className="text-red-500">*</span></label>
                 <Input
-                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                  className={`h-8 text-xs ${errs.chart_number ? "border-red-400 focus:ring-red-400" : "border-gray-300 focus:ring-secondary"}`}
                   value={formData.chart_number}
                   onChange={(e) => handleChange("chart_number", e.target.value)}
                   placeholder="e.g. 2026-00001"
                 />
+                {errs.chart_number && <p className="text-[10px] text-red-500 mt-0.5">{errs.chart_number}</p>}
               </div>
               <div>
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Age</label>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Age <span className="text-red-500">*</span></label>
                 <Input
-                  className="h-8 text-xs border-gray-300 focus:ring-secondary"
+                  className={`h-8 text-xs ${errs.age ? "border-red-400 focus:ring-red-400" : "border-gray-300 focus:ring-secondary"}`}
                   type="number"
                   min="1"
                   max="99"
@@ -309,11 +335,12 @@ export function NewPatientReferralModal({
                   value={formData.age || ""}
                   onChange={(e) => handleChange("age", parseInt(e.target.value) || 0)}
                 />
+                {errs.age && <p className="text-[10px] text-red-500 mt-0.5">{errs.age}</p>}
               </div>
               <div className="col-span-2">
-                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Sex</label>
+                <label className="text-[10px] font-semibold text-gray-500 mb-1 block">Sex <span className="text-red-500">*</span></label>
                 <select
-                  className="w-full h-8 text-xs px-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary bg-white"
+                  className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${errs.sex ? "border-red-400 focus:ring-red-400" : "border-gray-300 focus:ring-secondary"}`}
                   value={formData.sex || ""}
                   onChange={(e) => handleChange("sex", e.target.value)}
                 >
@@ -321,9 +348,12 @@ export function NewPatientReferralModal({
                   <option value="Male">Male</option>
                   <option value="Female">Female</option>
                 </select>
+                {errs.sex && <p className="text-[10px] text-red-500 mt-0.5">{errs.sex}</p>}
               </div>
             </div>
           </div>
+            );
+          })()}
 
           {/* Medical Alert */}
           <div className="bg-red-50 rounded-lg p-2.5 sm:p-3 border border-red-200">
@@ -335,97 +365,113 @@ export function NewPatientReferralModal({
           </div>
 
           {/* Clinical Pathway - Origin */}
-          <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 border border-blue-200 space-y-2">
+          {(() => {
+            const errs = submitted ? getValidationErrors() : {};
+            return (
+          <div className={`bg-blue-50 rounded-lg p-2.5 sm:p-3 border space-y-2 ${(errs.origin_section || errs.origin_discipline) ? "border-red-300" : "border-blue-200"}`}>
             <label className="text-[10px] font-bold text-blue-700 uppercase tracking-wide block">Clinical Pathway — Origin</label>
             <div>
-              <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Clinical Section</label>
+              <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Clinical Section <span className="text-red-500">*</span></label>
               <select
                 value={originSection}
                 onChange={(e) => handleOriginSectionChange(e.target.value)}
-                className="w-full h-8 text-xs px-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${errs.origin_section ? "border-red-400 focus:ring-red-400" : "border-blue-300 focus:ring-blue-500"}`}
               >
                 <option value="">Select Clinical Section</option>
                 {filterTaxonomy.map((section) => (
                   <option key={section.id} value={section.id}>{section.name} ({section.shortName})</option>
                 ))}
               </select>
+              {errs.origin_section && <p className="text-[10px] text-red-500 mt-0.5">{errs.origin_section}</p>}
             </div>
             {originSection !== "prostho" && (
               <div>
-                <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Clinical Discipline</label>
+                <label className="text-[10px] font-semibold text-blue-500 mb-1 block">Clinical Discipline <span className="text-red-500">*</span></label>
                 <select
                   value={originDiscipline}
                   onChange={(e) => handleOriginDisciplineChange(e.target.value)}
                   disabled={!originSection}
-                  className="w-full h-8 text-xs px-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed ${errs.origin_discipline ? "border-red-400 focus:ring-red-400" : "border-blue-300 focus:ring-blue-500"}`}
                 >
                   <option value="">Select Clinical Discipline</option>
                   {getOriginDisciplines().map((discipline) => (
                     <option key={discipline.id} value={discipline.id}>{discipline.name}</option>
                   ))}
                 </select>
+                {errs.origin_discipline && <p className="text-[10px] text-red-500 mt-0.5">{errs.origin_discipline}</p>}
               </div>
             )}
           </div>
+            );
+          })()}
 
           {/* Clinical Pathway - Destination */}
-          <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 border border-green-200 space-y-2">
+          {(() => {
+            const errs = submitted ? getValidationErrors() : {};
+            return (
+          <div className={`bg-green-50 rounded-lg p-2.5 sm:p-3 border space-y-2 ${(errs.dest_section || errs.dest_discipline || errs.dest_treatment) ? "border-red-300" : "border-green-200"}`}>
             <label className="text-[10px] font-bold text-green-700 uppercase tracking-wide block">Clinical Pathway — Destination</label>
             <div>
-              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Clinical Section</label>
+              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Clinical Section <span className="text-red-500">*</span></label>
               <select
                 value={destSection}
                 onChange={(e) => handleDestSectionChange(e.target.value)}
-                className="w-full h-8 text-xs px-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${errs.dest_section ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
               >
                 <option value="">Select Clinical Section</option>
                 {filterTaxonomy.map((section) => (
                   <option key={section.id} value={section.id}>{section.name} ({section.shortName})</option>
                 ))}
               </select>
+              {errs.dest_section && <p className="text-[10px] text-red-500 mt-0.5">{errs.dest_section}</p>}
             </div>
             {destSection !== "prostho" && (
               <div>
-                <label className="text-[10px] font-semibold text-green-500 mb-1 block">Clinical Discipline</label>
+                <label className="text-[10px] font-semibold text-green-500 mb-1 block">Clinical Discipline <span className="text-red-500">*</span></label>
                 <select
                   value={destDiscipline}
                   onChange={(e) => handleDestDisciplineChange(e.target.value)}
                   disabled={!destSection}
-                  className="w-full h-8 text-xs px-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed ${errs.dest_discipline ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
                 >
                   <option value="">Select Clinical Discipline</option>
                   {getDestDisciplines().map((discipline) => (
                     <option key={discipline.id} value={discipline.id}>{discipline.name}</option>
                   ))}
                 </select>
+                {errs.dest_discipline && <p className="text-[10px] text-red-500 mt-0.5">{errs.dest_discipline}</p>}
               </div>
             )}
             <div>
-              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Treatment Service</label>
+              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Treatment Service <span className="text-red-500">*</span></label>
               <select
                 value={destTreatment}
                 onChange={(e) => handleDestTreatmentChange(e.target.value)}
                 disabled={!destSection || (!destDiscipline && destSection !== "prostho")}
-                className="w-full h-8 text-xs px-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                className={`w-full h-8 text-xs px-2 border rounded-lg focus:outline-none focus:ring-2 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed ${errs.dest_treatment ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
               >
                 <option value="">Select Treatment Service</option>
                 {getDestTreatments().map((treatment) => (
                   <option key={treatment.id} value={treatment.id}>{treatment.name}</option>
                 ))}
               </select>
+              {errs.dest_treatment && <p className="text-[10px] text-red-500 mt-0.5">{errs.dest_treatment}</p>}
             </div>
             {formData.treatment_service_destination === "Special Case" && (
             <div>
-              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Special Case</label>
+              <label className="text-[10px] font-semibold text-green-500 mb-1 block">Special Case <span className="text-red-500">*</span></label>
               <Input
-                className="h-8 text-xs border-green-300 focus:ring-green-500"
+                className={`h-8 text-xs ${errs.special_case ? "border-red-400 focus:ring-red-400" : "border-green-300 focus:ring-green-500"}`}
                 value={formData.special_case}
                 onChange={(e) => handleChange("special_case", e.target.value)}
                 placeholder="Enter special case if applicable"
               />
+              {errs.special_case && <p className="text-[10px] text-red-500 mt-0.5">{errs.special_case}</p>}
             </div>
             )}
           </div>
+            );
+          })()}
 
           {/* Appointment */}
           <div>

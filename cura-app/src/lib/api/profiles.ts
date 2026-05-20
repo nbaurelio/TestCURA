@@ -29,7 +29,7 @@ export interface Profile {
   batch_name?: string;
   role: string;
   subrole?: string | null;
-  adviser_id?: string | null;
+  adviser_ids?: string[] | null; // Array of professor IDs who are advisers for this clinician
   /**
    * Plaintext password for the mock auth flow (System Admin–assigned). Only
    * used by the test environment — production must move to Supabase Auth.
@@ -125,12 +125,12 @@ export function getMockUserProfileSync(): Profile | null {
   return profileCache?.data || null;
 }
 
-// Get advisees for a professor (profiles where adviser_id matches the professor's ID)
+// Get advisees for a professor (profiles where adviser_ids contains the professor's ID)
 export async function getAdvisees(professorId: string): Promise<Profile[]> {
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
-    .eq("adviser_id", professorId)
+    .contains("adviser_ids", [professorId])
     .order("last_name", { ascending: true });
 
   if (error) {

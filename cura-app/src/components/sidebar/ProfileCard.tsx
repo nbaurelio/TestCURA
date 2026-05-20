@@ -110,18 +110,27 @@ export function ProfileCard({
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Role</span>
               <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">{displaySubrole || "Professor"}</span>
             </div>
+          ) : profile?.role === 'clinical_admin' ? (
+            <>
+              <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Discipline</span>
+                <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">OD</span>
+              </div>
+              <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Section</span>
+                <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">{displayDepartment || "OM"}</span>
+              </div>
+            </>
           ) : (
             <>
               <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">{profile?.role === 'clinical_admin' ? 'Section' : 'Shift'}</span>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Shift</span>
                 <span className="text-[11px] font-semibold text-secondary text-right max-w-[60%] leading-tight">{displayDepartment}</span>
               </div>
-              {profile?.role !== 'clinical_admin' && (
-                <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Year</span>
-                  <span className="text-[11px] font-semibold text-secondary">{displayYearLevel}</span>
-                </div>
-              )}
+              <div className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-secondary/15 shadow-sm">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Year</span>
+                <span className="text-[11px] font-semibold text-secondary">{displayYearLevel}</span>
+              </div>
             </>
           )}
         </div>

@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Search, FileText, Bell, LogOut, User, Activity, ChevronDown, Calendar, MapPin, Clock, Archive } from "lucide-react";
+import { Search, FileText, Bell, LogOut, User, Activity, ChevronDown, Calendar, MapPin, Clock, Archive, BellOff, BellRing } from "lucide-react";
 import { getMockUserProfile, Profile, getMockUserProfileSync, hasProfileCache } from "@/lib/api/profiles";
 import { useAuth } from "@/context/AuthContext";
-import { getReferralNotifications, getCalendarNotifications, formatActionLabel, getActionColor, ReferralNotification, CalendarNotification } from "@/lib/api/notifications";
+import { useNotificationContext, SystemNotification } from "@/context/NotificationContext";
+import { getReferralNotifications, getCalendarNotifications, formatActionLabel, getActionColor, getDNDState, setDNDState, ReferralNotification, CalendarNotification } from "@/lib/api/notifications";
+import { sendSystemNotification } from "@/lib/utils/notify";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -23,6 +25,7 @@ interface HeaderProps {
 
 export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
   const { logout, role } = useAuth();
+  const { recentNotifications: contextNotifications, unreadCount: contextUnreadCount, markAsRead: markContextAsRead, clearNotifications: clearContextNotifications } = useNotificationContext();
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   // Initialize with cached data to prevent avatar flickering on navigation
   const [profile, setProfile] = useState<Profile | null>(getMockUserProfileSync());
@@ -40,8 +43,34 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
   const [calendarNotifs, setCalendarNotifs] = useState<CalendarNotification[]>([]);
   const [isReferralPanelOpen, setIsReferralPanelOpen] = useState(false);
   const [isCalendarPanelOpen, setIsCalendarPanelOpen] = useState(false);
+  const [isDNDEnabled, setIsDNDEnabled] = useState(false);
   const referralPanelRef = useRef<HTMLDivElement>(null);
   const calendarPanelRef = useRef<HTMLDivElement>(null);
+  const seenNotifIds = useRef<Set<string>>(new Set());
+  const isFirstLoad = useRef(true);
+  const contextNotificationsRef = useRef(contextNotifications);
+
+  // Keep ref in sync so loadNotifications always sees latest context notifications
+  useEffect(() => {
+    contextNotificationsRef.current = contextNotifications;
+  }, [contextNotifications]);
+
+  // Load DND state on mount
+  useEffect(() => {
+    setIsDNDEnabled(getDNDState());
+  }, []);
+
+  // Toggle DND state
+  const toggleDND = useCallback(() => {
+    const newState = !isDNDEnabled;
+    setDNDState(newState);
+    setIsDNDEnabled(newState);
+    if (newState) {
+      setReferralNotifs([]);
+    } else {
+      loadNotifications();
+    }
+  }, [isDNDEnabled]);
 
   const CATEGORIES = [
     { value: "medical_alert",   label: "Medical Alert" },
@@ -70,15 +99,85 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch notifications
+  // Fetch notifications and merge with context notifications (from system notifications)
   const loadNotifications = useCallback(async () => {
     try {
       const [refNotifs, calNotifs] = await Promise.all([
         getReferralNotifications(),
         getCalendarNotifications(),
       ]);
-      setReferralNotifs(refNotifs);
-      setCalendarNotifs(calNotifs);
+
+      // Read latest context notifications via ref to avoid stale closure
+      const latestContextNotifs = contextNotificationsRef.current;
+
+      // Convert context notifications to ReferralNotification format and merge
+      const contextReferralNotifs = latestContextNotifs
+        .filter(n => n.type === "referral" || n.type === "system")
+        .map(n => ({
+          id: n.id,
+          action: "SYSTEM_NOTIFICATION" as string,
+          description: `${n.title}: ${n.body}`,
+          created_at: n.created_at,
+          metadata: null,
+          read: n.read,
+        }));
+
+      // Convert context calendar notifications
+      const contextCalendarNotifs = latestContextNotifs
+        .filter(n => n.type === "calendar")
+        .map(n => ({
+          id: n.id,
+          title: n.title,
+          start_time: n.created_at, // Use created time as fallback
+          end_time: n.created_at,
+          location: undefined,
+          patient_name: n.body,
+          isUpcoming: true,
+        }));
+
+      // Merge and sort by date (newest first), remove duplicates by id
+      const mergedReferral = [...contextReferralNotifs, ...refNotifs]
+        .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 20);
+
+      const mergedCalendar = [...contextCalendarNotifs, ...calNotifs]
+        .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+        .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
+        .slice(0, 20);
+
+      setReferralNotifs(mergedReferral);
+      setCalendarNotifs(mergedCalendar);
+
+      // Fire Windows notifications for new INCOMING_* rows (professor/admin inbox)
+      if (!isFirstLoad.current) {
+        const INCOMING_ACTIONS = [
+          "INCOMING_EDIT_REQUEST",
+          "INCOMING_REREFER_REQUEST",
+          "INCOMING_DELETION_REQUEST",
+          "INCOMING_STATUS_CHANGE_REQUEST",
+        ];
+        const INCOMING_LABELS: Record<string, string> = {
+          INCOMING_EDIT_REQUEST:          "📝 New Edit Request",
+          INCOMING_REREFER_REQUEST:       "🔄 New Rerefer Request",
+          INCOMING_DELETION_REQUEST:      "🗑️ New Deletion Request",
+          INCOMING_STATUS_CHANGE_REQUEST: "📋 New Status Change Request",
+        };
+        for (const notif of refNotifs) {
+          if (INCOMING_ACTIONS.includes(notif.action) && !seenNotifIds.current.has(notif.id)) {
+            seenNotifIds.current.add(notif.id);
+            sendSystemNotification(
+              INCOMING_LABELS[notif.action] || "New Request",
+              notif.description,
+              "referral"
+            );
+          }
+        }
+      } else {
+        // On first load, just seed the seen set — don't fire for old rows
+        for (const notif of refNotifs) seenNotifIds.current.add(notif.id);
+        isFirstLoad.current = false;
+      }
     } catch (err) {
       console.error("Error loading notifications:", err);
     }
@@ -197,42 +296,81 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
           {role !== "system_admin" && (
           <div ref={referralPanelRef} className="relative">
             <button
-              onClick={() => { setIsReferralPanelOpen(p => !p); setIsCalendarPanelOpen(false); }}
+              onClick={() => {
+                setIsReferralPanelOpen(p => !p);
+                setIsCalendarPanelOpen(false);
+                // Mark all context notifications as read when opening panel
+                contextNotifications.filter(n => !n.read).forEach(n => markContextAsRead(n.id));
+              }}
               className="p-2 rounded hover:bg-[#6aafc8] transition-colors relative"
             >
-              <FileText className="h-5 w-5 text-secondary" />
-              {referralNotifs.length > 0 && (
+              {isDNDEnabled ? (
+                <BellOff className="h-5 w-5 text-secondary/50" />
+              ) : (
+                <FileText className="h-5 w-5 text-secondary" />
+              )}
+              {!isDNDEnabled && contextUnreadCount > 0 && (
                 <span className="absolute top-1 right-1 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-1">
-                  {referralNotifs.length > 9 ? "9+" : referralNotifs.length}
+                  {contextUnreadCount > 9 ? "9+" : contextUnreadCount}
                 </span>
               )}
             </button>
             {isReferralPanelOpen && (
               <div className="absolute right-0 top-full mt-2 w-80 bg-white border-2 border-gray-200 rounded-xl shadow-2xl z-50 overflow-hidden">
-                <div className="bg-secondary px-4 py-2.5">
-                  <p className="text-white font-bold text-xs uppercase tracking-wide">Referral Updates</p>
-                  <p className="text-white/60 text-[9px]">Recent activity on your referrals</p>
+                <div className="bg-secondary px-4 py-2.5 flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-bold text-xs uppercase tracking-wide">Referral Updates</p>
+                    <p className="text-white/60 text-[9px]">Recent activity on your referrals</p>
+                  </div>
+                  <button
+                    onClick={toggleDND}
+                    className={`p-1.5 rounded transition-colors ${isDNDEnabled ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+                    title={isDNDEnabled ? "Turn off Do Not Disturb" : "Turn on Do Not Disturb"}
+                  >
+                    {isDNDEnabled ? <BellOff className="h-4 w-4" /> : <BellRing className="h-4 w-4" />}
+                  </button>
                 </div>
                 <div className="max-h-72 overflow-y-auto">
-                  {referralNotifs.length === 0 ? (
+                  {isDNDEnabled ? (
+                    <div className="p-6 text-center">
+                      <BellOff className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-xs text-gray-400 font-medium">Notifications silenced</p>
+                      <p className="text-[9px] text-gray-300 mt-1">Do Not Disturb is enabled</p>
+                    </div>
+                  ) : referralNotifs.length === 0 && contextNotifications.filter(n => n.type === "referral" || n.type === "system").length === 0 ? (
                     <div className="p-6 text-center">
                       <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
                       <p className="text-xs text-gray-400 font-medium">No referral updates</p>
                     </div>
                   ) : (
-                    referralNotifs.map((notif) => (
-                      <div key={notif.id} className="px-3 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-start gap-2">
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap mt-0.5 ${getActionColor(notif.action)}`}>
-                            {formatActionLabel(notif.action)}
-                          </span>
+                    <>
+                      {contextNotifications.filter(n => n.type === "referral" || n.type === "system").map((notif) => (
+                        <div key={notif.id} className={`px-3 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors ${!notif.read ? "bg-blue-50/40" : ""}`}>
+                          <div className="flex items-start gap-2">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap mt-0.5 bg-blue-100 text-blue-700">
+                              {notif.title}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-700 mt-1 line-clamp-2">{notif.body}</p>
+                          <p className="text-[9px] text-gray-400 mt-1">
+                            {new Date(notif.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                          </p>
                         </div>
-                        <p className="text-[11px] text-gray-700 mt-1 line-clamp-2">{notif.description}</p>
-                        <p className="text-[9px] text-gray-400 mt-1">
-                          {new Date(notif.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
-                        </p>
-                      </div>
-                    ))
+                      ))}
+                      {referralNotifs.map((notif) => (
+                        <div key={notif.id} className="px-3 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-start gap-2">
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap mt-0.5 ${getActionColor(notif.action)}`}>
+                              {formatActionLabel(notif.action)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-700 mt-1 line-clamp-2">{notif.description}</p>
+                          <p className="text-[9px] text-gray-400 mt-1">
+                            {new Date(notif.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                          </p>
+                        </div>
+                      ))}
+                    </>
                   )}
                 </div>
                 <Link
@@ -256,9 +394,9 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
               className="p-2 rounded hover:bg-[#6aafc8] transition-colors relative"
             >
               <Clock className="h-5 w-5 text-secondary" />
-              {calendarNotifs.length > 0 && (
+              {calendarNotifs.filter(e => e.isRecent || e.isUpcoming).length > 0 && (
                 <span className="absolute top-1 right-1 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-1">
-                  {calendarNotifs.length > 9 ? "9+" : calendarNotifs.length}
+                  {calendarNotifs.filter(e => e.isRecent || e.isUpcoming).length > 9 ? "9+" : calendarNotifs.filter(e => e.isRecent || e.isUpcoming).length}
                 </span>
               )}
             </button>
@@ -279,9 +417,15 @@ export function Header({ onProfileUpdate, onSearch }: HeaderProps = {}) {
                       <div key={event.id} className="px-3 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <div className="flex items-start justify-between">
                           <p className="text-xs text-gray-800 font-bold">{event.title}</p>
-                          {event.isUpcoming && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">Soon</span>
-                          )}
+                          {event.isRecent ? (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 whitespace-nowrap">Now</span>
+                          ) : event.isUpcoming && (() => {
+                            const diffMs = new Date(event.start_time).getTime() - Date.now();
+                            const diffH = diffMs / (1000 * 60 * 60);
+                            const label = diffH <= 1 ? "< 1 hr" : diffH <= 24 ? "Today" : diffH <= 48 ? "Tomorrow" : "Upcoming";
+                            const cls = diffH <= 1 ? "bg-orange-100 text-orange-700" : diffH <= 24 ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700";
+                            return <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${cls}`}>{label}</span>;
+                          })()}
                         </div>
                         <div className="flex items-center gap-3 mt-1">
                           <div className="flex items-center gap-1 text-[10px] text-gray-500">

@@ -6,13 +6,13 @@
 -- Professor Maria's ID (prof1@example.com)
 -- 22222222-2222-2222-2222-222222222222
 
--- ─── Additional Advisee Profiles (adviser_id → Prof Maria) ───────────────
+-- ─── Additional Advisee Profiles (adviser_ids → Prof Maria) ──────────────
 
-INSERT INTO profiles (id, email, first_name, last_name, year_level, clinical_department, role, adviser_id)
+INSERT INTO profiles (id, email, first_name, last_name, year_level, clinical_department, role, adviser_ids)
 VALUES
-  ('aaaa1111-1111-1111-1111-111111111111', 'carlos@example.com', 'Carlos', 'Santos', '4th yr', 'OM', 'clinician', '22222222-2222-2222-2222-222222222222'),
-  ('aaaa2222-2222-2222-2222-222222222222', 'maria.c@example.com', 'Maria Clara', 'Reyes', '5th yr', 'Prostho', 'clinician', '22222222-2222-2222-2222-222222222222'),
-  ('aaaa3333-3333-3333-3333-333333333333', 'jose@example.com', 'Jose', 'Garcia', '4th yr', 'OP', 'clinician', '22222222-2222-2222-2222-222222222222')
+  ('aaaa1111-1111-1111-1111-111111111111', 'carlos@example.com', 'Carlos', 'Santos', '4th yr', 'OM', 'clinician', ARRAY['22222222-2222-2222-2222-222222222222']),
+  ('aaaa2222-2222-2222-2222-222222222222', 'maria.c@example.com', 'Maria Clara', 'Reyes', '5th yr', 'Prostho', 'clinician', ARRAY['22222222-2222-2222-2222-222222222222']),
+  ('aaaa3333-3333-3333-3333-333333333333', 'jose@example.com', 'Jose', 'Garcia', '4th yr', 'OP', 'clinician', ARRAY['22222222-2222-2222-2222-222222222222'])
 ON CONFLICT (id) DO NOTHING;
 
 -- ─── Varied Referrals ────────────────────────────────────────────────────
@@ -94,11 +94,11 @@ VALUES ('aaaa1111-1111-1111-1111-111111111111', '2026-00014', 'Odontectomy', 19,
 
 -- ─── Advisee Profiles for Prof 2 ────────────────────────────────────────
 
-INSERT INTO profiles (id, email, first_name, last_name, year_level, clinical_department, role, adviser_id)
+INSERT INTO profiles (id, email, first_name, last_name, year_level, clinical_department, role, adviser_ids)
 VALUES
-  ('bbbb1111-1111-1111-1111-111111111111', 'anna@example.com', 'Anna', 'Mendoza', '4th yr', 'OP', 'clinician', '33333333-3333-3333-3333-333333333333'),
-  ('bbbb2222-2222-2222-2222-222222222222', 'miguel@example.com', 'Miguel', 'Tan', '5th yr', 'OM', 'clinician', '33333333-3333-3333-3333-333333333333'),
-  ('bbbb3333-3333-3333-3333-333333333333', 'sarah@example.com', 'Sarah', 'Lopez', '4th yr', 'Prostho', 'clinician', '33333333-3333-3333-3333-333333333333')
+  ('bbbb1111-1111-1111-1111-111111111111', 'anna@example.com', 'Anna', 'Mendoza', '4th yr', 'OP', 'clinician', ARRAY['33333333-3333-3333-3333-333333333333']),
+  ('bbbb2222-2222-2222-2222-222222222222', 'miguel@example.com', 'Miguel', 'Tan', '5th yr', 'OM', 'clinician', ARRAY['33333333-3333-3333-3333-333333333333']),
+  ('bbbb3333-3333-3333-3333-333333333333', 'sarah@example.com', 'Sarah', 'Lopez', '4th yr', 'Prostho', 'clinician', ARRAY['33333333-3333-3333-3333-333333333333'])
 ON CONFLICT (id) DO NOTHING;
 
 -- ─── Varied Referrals for Prof 2 Advisees ────────────────────────────────

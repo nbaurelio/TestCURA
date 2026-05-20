@@ -1,5 +1,22 @@
 import { supabase } from "@/lib/supabase";
-import { getCurrentUserId } from "@/lib/api/profiles";
+import { getCurrentUserId, getProfile } from "@/lib/api/profiles";
+
+// DND (Do Not Disturb) state - persisted in localStorage
+const DND_KEY = "cura_notifications_dnd";
+
+export function getDNDState(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(DND_KEY) === "true";
+}
+
+export function setDNDState(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  if (enabled) {
+    localStorage.setItem(DND_KEY, "true");
+  } else {
+    localStorage.removeItem(DND_KEY);
+  }
+}
 
 export interface ReferralNotification {
   id: string;
@@ -18,12 +35,20 @@ export interface CalendarNotification {
   location?: string;
   patient_name?: string;
   isUpcoming: boolean;
+  isRecent?: boolean;
 }
 
 // Fetch referral-related activity logs for the current user
+// For clinical chairs, also fetch notifications for all clinicians in their section
 export async function getReferralNotifications(): Promise<ReferralNotification[]> {
   const userId = getCurrentUserId();
+  const currentUser = await getProfile(userId);
   const activityLogsTable = supabase.from("activity_logs") as any;
+
+  // Check DND state - return empty if enabled
+  if (getDNDState()) {
+    return [];
+  }
 
   const referralActions = [
     "CREATE_REFERRAL",
@@ -51,19 +76,22 @@ export async function getReferralNotifications(): Promise<ReferralNotification[]
     "INCOMING_STATUS_CHANGE_REQUEST",
   ];
 
-  const { data, error } = await activityLogsTable
+  // Base query for user's own notifications
+  let query = activityLogsTable
     .select("*")
     .eq("user_id", userId)
-    .in("action", referralActions)
+    .in("action", referralActions);
+
+  const { data: ownData, error: ownError } = await query
     .order("created_at", { ascending: false })
     .limit(20);
 
-  if (error) {
-    console.error("Error fetching referral notifications:", error);
+  if (ownError) {
+    console.error("Error fetching referral notifications:", ownError);
     return [];
   }
 
-  return (data || []).map((log: any) => ({
+  let allNotifications = (ownData || []).map((log: any) => ({
     id: log.id,
     action: log.action,
     description: log.description,
@@ -71,37 +99,120 @@ export async function getReferralNotifications(): Promise<ReferralNotification[]
     metadata: log.metadata ? (typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata) : null,
     read: false,
   }));
+
+  // For clinical chairs, fetch notifications from ALL clinicians across all sections
+  if (currentUser?.role === "clinical_admin") {
+    // Get ALL clinicians (regardless of department)
+    const { data: allClinicians } = await supabase
+      .from("profiles")
+      .select("id, clinical_department")
+      .eq("role", "clinician");
+
+    if (allClinicians && allClinicians.length > 0) {
+      const clinicianIds = allClinicians.map((p: any) => p.id);
+
+      // Get notifications for all clinicians (requests they sent)
+      const { data: sectionData } = await activityLogsTable
+        .select("*")
+        .in("user_id", clinicianIds)
+        .in("action", ["REREFER_REQUEST", "DELETION_REQUEST", "CHANGE_REFERRAL_STATUS"])
+        .order("created_at", { ascending: false })
+        .limit(30);
+
+      if (sectionData) {
+        // Build a map of clinician ID to department for labeling
+        const clinicianDeptMap = new Map(allClinicians.map((p: any) => [p.id, p.clinical_department]));
+
+        const sectionNotifications = sectionData.map((log: any) => {
+          const dept = clinicianDeptMap.get(log.user_id);
+          const deptLabel = dept ? `[${dept}]` : "[Section]";
+          return {
+            id: `section-${log.id}`,
+            action: log.action,
+            description: `${deptLabel} ${log.description}`,
+            created_at: log.created_at,
+            metadata: log.metadata ? (typeof log.metadata === "string" ? JSON.parse(log.metadata) : log.metadata) : null,
+            read: false,
+          };
+        });
+
+        // Merge and sort by date (newest first), remove duplicates by id
+        allNotifications = [...allNotifications, ...sectionNotifications]
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 30);
+      }
+    }
+  }
+
+  return allNotifications;
 }
 
-// Fetch upcoming events for the current user as calendar notifications
+// Fetch upcoming favorited events for the current user as calendar notifications.
+// Professors may also have favorites stored in event_overrides — we fetch those
+// separately and merge so the dropdown reflects the same set as the planner.
 export async function getCalendarNotifications(): Promise<CalendarNotification[]> {
   const userId = getCurrentUserId();
 
-  const { data, error } = await supabase
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+  // 1. Own events that are favorited
+  const { data: ownData, error: ownError } = await supabase
     .from("events")
     .select("*")
     .eq("user_id", userId)
-    .gte("start_time", new Date().toISOString())
+    .eq("is_favorite", true)
+    .gte("start_time", oneHourAgo)
     .order("start_time", { ascending: true })
     .limit(20);
 
-  if (error) {
-    console.error("Error fetching calendar notifications:", error);
+  if (ownError) {
+    console.error("Error fetching calendar notifications:", ownError);
     return [];
   }
 
-  const now = new Date();
-  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  // 2. Events favorited via event_overrides (professor favorites on other users' events)
+  const { data: overrideData, error: overrideError } = await (supabase
+    .from("event_overrides" as any) as any)
+    .select("event_id")
+    .eq("professor_id", userId)
+    .eq("is_favorite", true);
 
-  return (data || []).map((event: any) => ({
-    id: event.id,
-    title: event.title,
-    start_time: event.start_time,
-    end_time: event.end_time,
-    location: event.location,
-    patient_name: event.patient_name,
-    isUpcoming: new Date(event.start_time) <= in24h,
-  }));
+  let overrideEvents: any[] = [];
+  if (!overrideError && overrideData && overrideData.length > 0) {
+    const eventIds = overrideData.map((o: any) => o.event_id);
+    const { data: evData } = await supabase
+      .from("events")
+      .select("*")
+      .in("id", eventIds)
+      .gte("start_time", oneHourAgo)
+      .order("start_time", { ascending: true })
+      .limit(20);
+    overrideEvents = evData || [];
+  }
+
+  // Merge, deduplicate by id, sort by start_time ascending
+  const ownIds = new Set((ownData || []).map((e: any) => e.id));
+  const merged = [
+    ...(ownData || []),
+    ...overrideEvents.filter((e: any) => !ownIds.has(e.id)),
+  ].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+   .slice(0, 20);
+
+  const now = new Date();
+
+  return merged.map((event: any) => {
+    const startMs = new Date(event.start_time).getTime();
+    return {
+      id: event.id,
+      title: event.title,
+      start_time: event.start_time,
+      end_time: event.end_time,
+      location: event.location,
+      patient_name: event.patient_name,
+      isUpcoming: startMs > now.getTime(),
+      isRecent: startMs <= now.getTime(),
+    };
+  });
 }
 
 // Format action label for display
